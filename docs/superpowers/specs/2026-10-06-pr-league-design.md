@@ -1,111 +1,88 @@
-# PR League: Design
+# PR League: Design (Proof of Concept)
 
 Date: 2026-10-06
 Status: Draft, awaiting review
 
 ## Purpose
 
-A personal learning project: a Slack bot that gamifies pull request reviews for a small team. Players earn points for reviewing PRs and for having their own PRs reviewed. A league table resets at the start of every month. Once a week, each player receives a Slack DM showing their points and their position relative to the rest of the team.
+A proof of concept for a Slack bot that gamifies pull request reviews for a small team. Players earn points for reviewing PRs and for having their own PRs reviewed. The league table covers the current calendar month, so it resets at the start of every month. Each run DMs every player their points and their position relative to the rest of the team.
+
+The goal is to prove the idea works end to end. Details will be adjusted locally as it gets used.
 
 ## Decisions Made
 
 | Question | Decision |
 |----------|----------|
-| Purpose | Learning / side project, not company tooling |
+| Purpose | Proof of concept, personal learning project |
 | PR source | GitHub, whole org |
-| Trigger | Scheduled weekly batch job |
+| Trigger | Run by hand from the terminal (intended weekly) |
 | Players | A few named people, listed in a config file |
 | Scoring | 1 point per review given, 1 point per review received |
-| League | Monthly, lazy reset, weekly standing in DM |
-| Stack | Python 3.12, uv, SQLite, `httpx`, run by launchd on the user's Mac |
+| League | Current calendar month, computed fresh from GitHub on every run |
+| State | None. No database. |
+| Stack | Python 3.12, uv, `httpx` |
 
-## Non-Goals
+## Non-Goals (for the PoC)
 
-- No web server, Events API, slash commands, or interactivity. The bot never listens; it only posts.
-- No web UI.
-- No multi-workspace support, OAuth install flow, or app distribution.
-- No always-on process. No cloud deployment (may move to GitHub Actions later).
+- No database or stored state.
+- No scheduler. Runs are manual.
+- No web server, Events API, slash commands, or interactivity. The bot only posts.
+- No CI, coverage gate, or live contract tests.
 - No weighted scoring, streaks, or bonuses.
 
 ## Architecture
 
-One Python project, `pr-league`, made of small single-purpose modules.
-
 ```
 pr-league/
-├── pyproject.toml          # uv-managed, Python 3.12
+├── pyproject.toml
 ├── config.yaml             # org + roster (GitHub login, Slack member ID)
 ├── .env                    # tokens, gitignored
-├── league.db               # SQLite state, gitignored
 ├── src/pr_league/
-│   ├── config.py           # load and validate config.yaml
-│   ├── github.py           # fetch review events for the org in a window
-│   ├── scoring.py          # pure: review events + roster -> points delta per player
-│   ├── league.py           # SQLite: points, monthly rollover, standings, last_run_at
+│   ├── config.py           # load config.yaml and tokens
+│   ├── github.py           # fetch review events for the org in a date range
+│   ├── scoring.py          # pure: events + roster -> points and ranked standings
 │   ├── rendering.py        # pure: standings -> DM text
 │   ├── slack.py            # post a DM
-│   └── main.py             # orchestration of one weekly run
+│   └── main.py             # one run: fetch, score, render, send
 └── tests/
-    ├── unit/               # mirrors src layout
-    ├── component/
-    └── contract/           # live GitHub tests, opt-in
+    └── unit/               # scoring and rendering
 ```
 
-Module responsibilities:
+`scoring.py` and `rendering.py` are pure functions with no I/O. `main.py` passes the GitHub and Slack clients in, so they can be swapped for fakes if needed.
 
-- `github.py` only talks to GitHub.
-- `scoring.py` and `rendering.py` are pure functions with no I/O.
-- `league.py` only touches SQLite.
-- `slack.py` only posts DMs.
-- `main.py` composes the others. Collaborators (`GitHubClient`, `LeagueStore`, `SlackMessenger`) are passed in as arguments, so each can be replaced by a fake in tests.
+## Data Flow: One Run
 
-## Data Flow: One Weekly Run
-
-1. **Trigger.** launchd runs `uv run pr-league` weekly (e.g. Mondays 09:00). A single invocation runs fetch, score, store, notify, then exits.
-2. **Fetch window.** The window starts at `last_run_at` from the store (first run: the previous 7 days) and ends at the run's start time.
-3. **Fetch.** `github.py` returns review events for the org in the window: reviewer login, PR author login, review ID, submitted-at timestamp. Pagination is handled inside this module. The exact GitHub API strategy (org PR search vs. per-repo listing) is an implementation-plan decision, verified by the contract tests.
-4. **Score.** `scoring.py` converts events to a points delta per rostered player:
-   - A review submitted by a rostered player: +1 to the reviewer ("given").
-   - The PR author of that review, if rostered: +1 ("received").
-   - Self-review never scores for either side.
-   - Non-rostered reviewers or authors score nothing, but the other side of the review still can.
+1. **Run.** `uv run pr-league` (or `--dry-run`).
+2. **Window.** From 00:00 on the 1st of the current month (machine local time) to now. Because every run recomputes the whole month from GitHub, the monthly reset needs no code, and there is no state to corrupt or double-count.
+3. **Fetch.** `github.py` returns review events in the window: review ID, reviewer login, PR author login, submitted-at. Pagination is handled inside this module. The API strategy (org-wide search vs. per-repo listing) is decided in the implementation plan.
+4. **Score.** For each review:
+   - A rostered reviewer gets +1 ("given").
+   - A rostered PR author gets +1 ("received").
+   - Self-reviews score nothing.
+   - Non-rostered people score nothing, but the other side of the review still can.
    - Each review ID counts once.
-5. **Store.** In a single SQLite transaction, `league.py` adds the deltas to the current month's totals and updates `last_run_at`. Because both happen together, a crash cannot double-count or drop events.
-6. **Standings.** Computed from the current month's rows. Ties share a position.
-7. **DM.** `rendering.py` builds each player's message and `slack.py` posts it.
-8. **Failure handling.**
-   - If the GitHub fetch fails, the run aborts before storing anything. The next run's window simply covers the gap.
-   - DM failures are isolated per player: logged, and the run continues. Points are already stored, so a failed DM never loses scoring.
+5. **Rank.** Players are sorted by total points. Ties share a position.
+6. **DM.** Each player gets one message. If a DM fails, it's logged and the run continues to the next player. If the GitHub fetch fails, the run stops before sending anything.
 
-### State schema
-
-```
-players (github_login PRIMARY KEY, slack_id)
-points  (player, month, given, received)    -- month like "2026-10"
-meta    (key PRIMARY KEY, value)            -- last_run_at
-```
-
-The monthly reset is lazy: there is no reset job. A run in a new month writes to the new month's rows, and standings always read the current month. Earlier months remain as history.
+Trade-off: re-fetching the whole month on every run costs more GitHub API calls than an incremental approach. That's fine for a small org at weekly frequency. If it isn't, the fix is to add stored state (see Later).
 
 ### DM content
-
-Example:
 
 > **PR League: October, week 1**
 > You're **2nd** of 5 this month with **14 points** (7 reviews given, 7 received).
 > Next up: Sam, 1 point ahead of you.
 > Table: 1. Sam (15) · 2. You (14) · 3. Alex (11) …
 
-Rendering is a pure function of (player, standings, month, week number). Ordinals (1st, 2nd, 3rd, 4th, 11th, 12th, 13th) and tie wording must be correct.
+"Week N" is the week of the month the run happens in.
 
 ## Slack Setup
 
 1. Create an app at api.slack.com/apps, **From scratch**, in the target workspace.
-2. Under **OAuth & Permissions → Bot Token Scopes**, add `chat:write`. No other scopes are needed.
+2. Under **OAuth & Permissions → Bot Token Scopes**, add `chat:write`.
 3. **Install to Workspace** and copy the Bot User OAuth Token (`xoxb-…`) into `.env` as `SLACK_BOT_TOKEN`.
-4. Each player's Slack member ID (`U…`: profile → ⋯ → Copy member ID) goes in `config.yaml`.
-5. **DM delivery.** The bot posts with `chat.postMessage`, passing the member ID as `channel`. The message appears in the app's Messages tab for that user. Whether a player must open that tab first is to be confirmed in the first live test. If it is required, setup adds one step: each player opens the bot once.
-6. A GitHub PAT with read access to the org's repos goes in `.env` as `GITHUB_TOKEN`.
+4. Put each player's Slack member ID (`U…`: profile → ⋯ → Copy member ID) in `config.yaml`.
+5. The bot posts with `chat.postMessage`, passing the member ID as `channel`. The message lands in the app's Messages tab. Whether a player must open that tab first is checked in the first live run.
+6. Put a GitHub PAT with read access to the org's repos in `.env` as `GITHUB_TOKEN`.
 
 ```yaml
 org: your-github-org
@@ -114,37 +91,23 @@ players:
     slack: U0123ABCDEF
 ```
 
-Secrets stay in a gitignored `.env`. Moving them to a proper secrets store is a later option.
-
 ## CLI
 
-- `uv run pr-league`: normal run.
-- `--dry-run`: runs fetch and scoring, prints the DMs to stdout, posts nothing and does not write state.
-- `--player <github-login>`: restricts a run to one player, for debugging.
+- `uv run pr-league`: fetch, score, and send DMs.
+- `--dry-run`: print the DMs to stdout instead of sending.
 
-## Testing Strategy
+## Testing
 
-Bottom-up, mostly unit tier since this is a batch job with no web layer. pytest with `pytest-mock`, `pytest-cov`, `respx` for HTTP mocking.
-
-**Unit tier** (every PR, blocks merge):
-
-- `scoring`: in-window review scores; out-of-window does not; reviewer and author both score; non-rostered users score nothing; self-review guard; duplicate review ID counted once; inactive player has delta 0.
-- `config`: valid file loads; duplicate GitHub logins or Slack IDs rejected; missing org rejected; clear error messages.
-- `league`: points accumulate across runs; month rollover starts fresh rows; standings order; ties share a position; `last_run_at` round-trips. Uses a temp SQLite file.
-- `rendering`: position, gap to next player, ordinals, medals, ties.
-- `github` and `slack`: `respx` at the HTTP boundary; pagination, window filtering, error responses.
-
-**Component tier:** `main.py` wired with fake GitHub and Slack collaborators and a temp SQLite store. Asserts the correct deltas are stored, `last_run_at` advances, every player receives exactly one DM, and one failing DM does not stop the others.
-
-**Contract tier (opt-in):** a small number of live tests against the real GitHub API, skipped by default and enabled with a flag plus a real PAT. They verify pagination and window filtering at the one real boundary between our code and a system we do not own.
-
-**Practices:** tests are written before the code; every bug fix ships with a regression test; time is injected rather than read from the clock; no `sleep`. Line coverage must be at least 85% on the unit tier (`--cov-fail-under=85`).
+- Unit tests (pytest) for `scoring.py` and `rendering.py`, written before the code: review scoring rules, self-review, non-rostered users, duplicates, tie ranking, ordinals (1st, 2nd, 3rd, 11th, 12th, 13th), and gap-to-next wording.
+- GitHub and Slack modules are checked by hand with `--dry-run` and a real run against the team.
 
 ## Open Questions
 
-1. Whether a player must open the bot's Messages tab before the first DM (resolved by the first live test; see Slack Setup).
-2. Which GitHub API strategy gives the most reliable org-wide review listing (resolved in the implementation plan, confirmed by contract tests).
+1. Whether a player must open the bot's Messages tab before the first DM. Answered by the first live run.
+2. Which GitHub API strategy is most reliable for org-wide reviews. Decided in the implementation plan.
 
-## Next Step
+## Later (if the PoC graduates)
 
-After spec approval, write the implementation plan (writing-plans skill).
+- Stored state (SQLite) and incremental fetching.
+- A weekly launchd or GitHub Actions schedule.
+- HTTP-mocked tests for the GitHub and Slack modules, plus a coverage gate.
