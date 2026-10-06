@@ -17,7 +17,7 @@ The goal is to prove the idea works end to end. Details will be adjusted locally
 | PR source | GitHub, whole org |
 | Trigger | Run by hand from the terminal (intended weekly) |
 | Players | A few named people, listed in a config file |
-| Scoring | 1 point per review given, 1 point per review received |
+| Scoring | 1 point per PR reviewed, 1 point per reviewer on your PR. Each (reviewer, PR) pair counts once |
 | League | Current calendar month, computed fresh from GitHub on every run |
 | State | None. No database. |
 | Stack | Python 3.12, uv, `httpx` |
@@ -54,13 +54,13 @@ pr-league/
 
 1. **Run.** `uv run pr-league` (or `--dry-run`).
 2. **Window.** From 00:00 on the 1st of the current month (machine local time) to now. Because every run recomputes the whole month from GitHub, the monthly reset needs no code, and there is no state to corrupt or double-count.
-3. **Fetch.** `github.py` returns review events in the window: review ID, reviewer login, PR author login, submitted-at. Pagination is handled inside this module. The API strategy (org-wide search vs. per-repo listing) is decided in the implementation plan.
+3. **Fetch.** `github.py` returns review events in the window: PR URL, reviewer login, PR author login, submitted-at. Pagination is handled inside this module. The API strategy (org-wide search vs. per-repo listing) is decided in the implementation plan.
 4. **Score.** For each review:
    - A rostered reviewer gets +1 ("given").
    - A rostered PR author gets +1 ("received").
    - Self-reviews score nothing.
    - Non-rostered people score nothing, but the other side of the review still can.
-   - Each review ID counts once.
+   - Each (reviewer, PR) pair counts once, however many reviews the reviewer submits on that PR. GitHub records every reply in a review thread as a new review, so counting raw reviews inflated scores.
 5. **Rank.** Players are sorted by total points. Ties share a position.
 6. **DM.** Each player gets one message. If a DM fails, it's logged and the run continues to the next player. If the GitHub fetch fails, the run stops before sending anything.
 

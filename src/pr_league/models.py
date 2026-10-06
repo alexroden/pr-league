@@ -10,7 +10,7 @@ class Player:
 
 @dataclass(frozen=True)
 class ReviewEvent:
-    review_id: int
+    pr: str
     reviewer: str
     author: str
     submitted_at: datetime

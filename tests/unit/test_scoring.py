@@ -9,8 +9,8 @@ CAROL = Player("carol", "U3")
 WHEN = datetime(2026, 10, 2, tzinfo=timezone.utc)
 
 
-def review(review_id, reviewer, author):
-    return ReviewEvent(review_id, reviewer, author, WHEN)
+def review(pr_number, reviewer, author):
+    return ReviewEvent(f"acme/app#{pr_number}", reviewer, author, WHEN)
 
 
 def by_login(standings):
@@ -39,17 +39,31 @@ def test_non_rostered_author_still_rewards_the_reviewer():
     assert s["alice"].given == 1
 
 
-def test_duplicate_review_id_counts_once():
-    s = by_login(score([review(1, "alice", "bob"), review(1, "alice", "bob")], [ALICE, BOB]))
+def test_several_reviews_by_one_reviewer_on_one_pr_count_once():
+    events = [review(1, "alice", "bob"), review(1, "alice", "bob"), review(1, "alice", "bob")]
+    s = by_login(score(events, [ALICE, BOB]))
     assert s["alice"].given == 1
     assert s["bob"].received == 1
 
 
-def test_several_reviews_on_one_pr_each_count():
+def test_reviewer_pair_matching_ignores_login_case():
+    s = by_login(score([review(1, "alice", "bob"), review(1, "Alice", "bob")], [ALICE, BOB]))
+    assert s["alice"].given == 1
+
+
+def test_one_reviewer_on_two_prs_counts_twice():
     events = [review(1, "alice", "bob"), review(2, "alice", "bob")]
     s = by_login(score(events, [ALICE, BOB]))
     assert s["alice"].given == 2
     assert s["bob"].received == 2
+
+
+def test_two_reviewers_on_one_pr_each_count():
+    events = [review(1, "alice", "carol"), review(1, "bob", "carol")]
+    s = by_login(score(events, [ALICE, BOB, CAROL]))
+    assert s["alice"].given == 1
+    assert s["bob"].given == 1
+    assert s["carol"].received == 2
 
 
 def test_logins_match_case_insensitively():

@@ -35,7 +35,7 @@ class GitHubClient:
                 if submitted_at < since:
                     continue
                 events.append(
-                    ReviewEvent(review["id"], reviewer["login"], pr["user"]["login"], submitted_at)
+                    ReviewEvent(pr["html_url"], reviewer["login"], pr["user"]["login"], submitted_at)
                 )
         return events
 

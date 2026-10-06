@@ -7,13 +7,13 @@ def score(events: Iterable[ReviewEvent], players: Sequence[Player]) -> list[Stan
     roster = {p.github.lower(): p for p in players}
     given = dict.fromkeys(roster, 0)
     received = dict.fromkeys(roster, 0)
-    seen: set[int] = set()
+    seen: set[tuple[str, str]] = set()
 
     for event in events:
-        if event.review_id in seen:
-            continue
-        seen.add(event.review_id)
         reviewer, author = event.reviewer.lower(), event.author.lower()
+        if (reviewer, event.pr) in seen:
+            continue
+        seen.add((reviewer, event.pr))
         if reviewer == author:
             continue
         if reviewer in roster:
