@@ -1,0 +1,4 @@
+org: your-github-org
+players:
+  - github: alexghdev
+    slack: U0123ABCDEF
