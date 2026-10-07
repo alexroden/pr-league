@@ -76,7 +76,7 @@ If one DM fails it is logged and the run continues; the process exits non-zero a
 
 ## Try it without GitHub or Jira
 
-`send_test_dm.py` builds the full notification from fixture players, teams, two months of reviews and stubbed Jira ticket transitions. It never contacts GitHub or Jira, so it runs instantly. The Jira blocks show on Fridays, or on any day with `--jira`.
+`send_test_dm.py` builds the full notification with players, teams and identities from the roster file (`--config`, default `config.yaml`; the first player is you). Real players take the fixtures' stand-in names, and any leftover stand-ins stay in the league, so a roster of six or more has no fake rivals. Reviews, two months of history and Jira ticket transitions are stubbed. It never contacts GitHub or Jira, so it runs instantly. The Jira blocks show on Fridays, or on any day with `--jira`.
 
 ```bash
 uv run python send_test_dm.py --mock                     # print it

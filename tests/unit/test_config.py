@@ -1,6 +1,6 @@
 import pytest
 
-from pr_league.config import load_config
+from pr_league.config import load_config, load_players
 
 
 @pytest.fixture(autouse=True)
@@ -44,3 +44,18 @@ def test_team_and_slack_still_load(tmp_path):
 def test_org_and_players_are_required(tmp_path):
     with pytest.raises(ValueError):
         load(tmp_path, "org: acme\n")
+
+
+def test_load_players_needs_no_tokens(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    path = tmp_path / "roster.yaml"
+    path.write_text("org: acme\nplayers:\n  - github: sam\n    jira: 712020:abc\n    team: Web\n")
+    players = load_players(path)
+    assert [(p.github, p.jira, p.team) for p in players] == [("sam", "712020:abc", "Web")]
+
+
+def test_load_players_requires_at_least_one_player(tmp_path):
+    path = tmp_path / "roster.yaml"
+    path.write_text("org: acme\n")
+    with pytest.raises(ValueError):
+        load_players(path)

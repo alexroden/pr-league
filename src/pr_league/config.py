@@ -15,7 +15,7 @@ class Config:
     slack_token: str | None
 
 
-def load_config(path: str | Path = "config.yaml") -> Config:
+def _read(path: str | Path) -> tuple[str, tuple[Player, ...]]:
     raw = yaml.safe_load(Path(path).read_text()) or {}
     org = raw.get("org")
     entries = raw.get("players") or []
@@ -25,6 +25,15 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         Player(github=e["github"], slack=e.get("slack"), team=e.get("team"), jira=e.get("jira"))
         for e in entries
     )
+    return org, players
+
+
+def load_players(path: str | Path = "config.yaml") -> tuple[Player, ...]:
+    return _read(path)[1]
+
+
+def load_config(path: str | Path = "config.yaml") -> Config:
+    org, players = _read(path)
     github_token = os.environ.get("GITHUB_TOKEN")
     if not github_token:
         raise ValueError("GITHUB_TOKEN is not set (see .env.example)")

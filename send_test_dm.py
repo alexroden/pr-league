@@ -1,7 +1,9 @@
 """Send yourself a stubbed DM. With --mock, prints the DM and the Slack call instead of sending.
 
 All players, teams, and both months' reviews are fixtures — no GitHub is
-contacted, so it runs instantly. You play for YOUR_TEAM. If today is within
+contacted, so it runs instantly. The players, teams and identities come from the roster file
+(--config); the first player is you. Real players take the fixtures' stand-in names, and any
+leftover stand-ins stay in the league. Reviews and tickets are fixtures. If today is within
 WINNERS_WINDOW_DAYS of the start of the month, the DM also announces the
 previous month's stubbed winners. On Fridays, or with --jira, it ends with
 the reader's stubbed "This week in Jira" and "This month in Jira" blocks.
@@ -11,10 +13,10 @@ import logging
 import sys
 from datetime import datetime, timedelta
 
-import yaml
 from dotenv import load_dotenv
-from pathlib import Path
 
+from pr_league.casting import cast_roster, rename_reviews, rename_tickets
+from pr_league.config import load_players
 from pr_league.models import Player, ReviewEvent, TicketEvent
 from pr_league.rendering import month_start, render_dm, render_jira_month, render_jira_week, render_winners, week_start
 from pr_league.scoring import rank_teams, score, win_streaks
@@ -22,7 +24,6 @@ from pr_league.slack import SlackMessenger
 
 log = logging.getLogger("pr_league")
 
-YOUR_TEAM = "Platform"
 WINNERS_WINDOW_DAYS = 7
 FRIDAY = 4
 
@@ -117,10 +118,8 @@ def last_month_tickets(now):
 
 # Stubbed winners of the two months before the one being announced, oldest
 # first — jess and Web won both, so they announce a 2-month streak.
-AUGUST_WINNERS = {"jess"}
-SEPTEMBER_WINNERS = {"jess"}
-AUGUST_TEAM_WINNERS = {"Web"}
-SEPTEMBER_TEAM_WINNERS = {"Web"}
+AUGUST_WINNERS = SEPTEMBER_WINNERS = {"jess"}
+AUGUST_TEAM_WINNERS = SEPTEMBER_TEAM_WINNERS = {"Web"}
 
 
 def main():
@@ -137,25 +136,33 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     load_dotenv()
 
-    raw = yaml.safe_load(Path(args.config).read_text()) or {}
-    entries = raw.get("players") or []
-    if not entries:
-        sys.exit(f"{args.config} must set at least one player (see config.example.yaml)")
-    you = Player(github=entries[0]["github"], slack=entries[0]["slack"], team=YOUR_TEAM)
+    try:
+        real = load_players(args.config)
+    except (OSError, ValueError) as error:
+        sys.exit(f"{args.config}: {error}")
+    you = real[0]
+    if you.slack is None:
+        sys.exit(f"{you.github} has no Slack ID in {args.config}; the test DM goes to the first player")
 
     now = datetime.now().astimezone()
-    roster = (you,) + FAKE_PLAYERS
-    tickets = fixture_tickets(now, you.github)
-    standings = score(fixture_events(now), roster, tickets)
+    roster, rename = cast_roster(real, FAKE_PLAYERS)
+    tickets = rename_tickets(fixture_tickets(now, you.github), rename)
+    standings = score(rename_reviews(fixture_events(now), rename), roster, tickets)
     teams = rank_teams(standings)
 
     winners = ""
     if now.day <= WINNERS_WINDOW_DAYS:
-        prev_standings = score(last_month_events(now), roster, last_month_tickets(now))
+        prev_standings = score(
+            rename_reviews(last_month_events(now), rename),
+            roster,
+            rename_tickets(last_month_tickets(now), rename),
+        )
         prev_teams = rank_teams(prev_standings)
         prev_month_name = (now.replace(day=1) - timedelta(days=1)).strftime("%B")
-        streaks = win_streaks([AUGUST_WINNERS, SEPTEMBER_WINNERS])
-        team_streaks = win_streaks([AUGUST_TEAM_WINNERS, SEPTEMBER_TEAM_WINNERS])
+        earlier = {rename.get(name, name) for name in AUGUST_WINNERS}
+        streaks = win_streaks([earlier, earlier])
+        earlier_teams = {t.name for t in prev_teams if t.position == 1}
+        team_streaks = win_streaks([earlier_teams, earlier_teams])
         winners = render_winners(prev_standings, prev_teams, prev_month_name, streaks, team_streaks)
 
     jira = ""
