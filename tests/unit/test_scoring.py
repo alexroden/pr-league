@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from pr_league.models import Player, ReviewEvent, Standing
+from pr_league.models import Player, ReviewEvent, Standing, TicketEvent
 from pr_league.scoring import rank_teams, score, win_streaks
 
 ALICE = Player("alice", "U1")
@@ -157,3 +157,70 @@ def test_win_streaks_counts_each_tied_winner():
 
 def test_win_streaks_with_no_history_reports_single_win():
     assert win_streaks([{"sam"}]) == {"sam": 1}
+
+
+def ticket(key, actor, status):
+    return TicketEvent(key, actor, status, WHEN)
+
+
+def test_each_tracked_status_awards_its_points():
+    events = [
+        ticket("PLAT-1", "alice", "QE check run"),
+        ticket("PLAT-2", "bob", "Ready for production"),
+        ticket("PLAT-3", "carol", "Closed"),
+    ]
+    s = by_login(score([], [ALICE, BOB, CAROL], events))
+    assert (s["alice"].tickets, s["bob"].tickets, s["carol"].tickets) == (2, 2, 3)
+
+
+def test_ticket_points_add_to_review_points():
+    s = by_login(score([review(1, "alice", "bob")], [ALICE, BOB], [ticket("PLAT-1", "alice", "Closed")]))
+    assert s["alice"].points == 5
+
+
+def test_only_the_actor_earns_ticket_points():
+    s = by_login(score([], [ALICE, BOB], [ticket("PLAT-1", "alice", "Closed")]))
+    assert s["bob"].tickets == 0
+
+
+def test_same_ticket_and_status_by_one_actor_counts_once():
+    events = [ticket("PLAT-1", "alice", "Closed"), ticket("PLAT-1", "alice", "Closed")]
+    assert by_login(score([], [ALICE], events))["alice"].tickets == 3
+
+
+def test_same_ticket_moving_through_each_status_scores_each():
+    events = [
+        ticket("PLAT-1", "alice", "QE check run"),
+        ticket("PLAT-1", "alice", "Ready for production"),
+        ticket("PLAT-1", "alice", "Closed"),
+    ]
+    assert by_login(score([], [ALICE], events))["alice"].tickets == 7
+
+
+def test_untracked_status_scores_nothing():
+    assert by_login(score([], [ALICE], [ticket("PLAT-1", "alice", "In Progress")]))["alice"].tickets == 0
+
+
+def test_non_rostered_actor_scores_nothing():
+    s = by_login(score([], [ALICE], [ticket("PLAT-1", "stranger", "Closed")]))
+    assert s["alice"].tickets == 0
+
+
+def test_ticket_actor_matches_case_insensitively():
+    assert by_login(score([], [ALICE], [ticket("PLAT-1", "Alice", "Closed")]))["alice"].tickets == 3
+
+
+def test_ticket_points_decide_positions():
+    standings = score([review(1, "alice", "carol")], [ALICE, BOB, CAROL], [ticket("PLAT-1", "bob", "Closed")])
+    assert [(s.player.github, s.position) for s in standings] == [("bob", 1), ("alice", 2), ("carol", 3)]
+
+
+def test_ticket_points_can_tie_with_review_points():
+    standings = score([review(1, "alice", "carol")], [ALICE, BOB], [ticket("PLAT-1", "bob", "QE check run")])
+    assert [s.position for s in standings] == [1, 1]
+
+
+def test_team_totals_include_ticket_points():
+    alice, bob = Player("alice", "U1", "Web"), Player("bob", "U2", "Data")
+    teams = rank_teams(score([review(1, "alice", "bob")], [alice, bob], [ticket("PLAT-1", "bob", "Closed")]))
+    assert [(t.name, t.points) for t in teams] == [("Data", 4), ("Web", 2)]

@@ -3,6 +3,11 @@ from datetime import datetime
 
 GIVEN_POINTS = 2
 RECEIVED_POINTS = 1
+TICKET_POINTS = {
+    "QE check run": 2,
+    "Ready for production": 2,
+    "Closed": 3,
+}
 
 
 @dataclass(frozen=True)
@@ -21,15 +26,24 @@ class ReviewEvent:
 
 
 @dataclass(frozen=True)
+class TicketEvent:
+    key: str
+    actor: str
+    status: str
+    at: datetime
+
+
+@dataclass(frozen=True)
 class Standing:
     player: Player
     given: int
     received: int
     position: int
+    tickets: int = 0
 
     @property
     def points(self) -> int:
-        return GIVEN_POINTS * self.given + RECEIVED_POINTS * self.received
+        return GIVEN_POINTS * self.given + RECEIVED_POINTS * self.received + self.tickets
 
 
 @dataclass(frozen=True)
