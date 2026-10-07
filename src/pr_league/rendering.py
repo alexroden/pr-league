@@ -1,7 +1,7 @@
-from collections.abc import Sequence
-from datetime import date
+from collections.abc import Iterable, Sequence
+from datetime import date, datetime, timedelta
 
-from pr_league.models import Standing, TeamStanding
+from pr_league.models import TICKET_POINTS, Player, Standing, TeamStanding, TicketEvent
 
 
 def ordinal(n: int) -> str:
@@ -47,6 +47,7 @@ def render_dm(
     today: date,
     teams: Sequence[TeamStanding] = (),
     winners: str = "",
+    jira: str = "",
 ) -> str:
     week = (today.day - 1) // 7 + 1
     lines = [f"🏆 *PR League: {today.strftime('%B')}, week {week}*"]
@@ -83,7 +84,9 @@ def render_dm(
     place = ("joint " if tied else "") + ordinal(me.position)
     lines.append(
         f"You're *{place}* of {len(standings)} this month with "
-        f"*{_count(me.points, 'point')}* ({_count(me.given, 'review')} given, {me.received} received)."
+        f"*{_count(me.points, 'point')}* ({_count(me.given, 'review')} given, {me.received} received"
+        + (f", {me.tickets} from tickets" if me.tickets else "")
+        + ")."
     )
 
     ahead = [s for s in standings if s.position < me.position]
@@ -103,6 +106,9 @@ def render_dm(
         lines.append("*Team league*")
         lines.append("")
         lines.append(_render_team_table(me, podium))
+    if jira:
+        lines.append("")
+        lines.append(jira)
     return "\n".join(lines)
 
 
@@ -119,16 +125,20 @@ def _render_table(me: Standing, standings: Sequence[Standing]) -> str:
 
     given_digits = max(len("Given"), max(len(str(s.given)) for s in standings))
     received_digits = max(len("Received"), max(len(str(s.received)) for s in standings))
+    show_tickets = any(s.tickets for s in standings)
+    ticket_digits = max(len("Tickets"), max(len(str(s.tickets)) for s in standings))
     rows = [
         f" #  {'Player':<{width}}  {'Pts':>{digits}}   "
         f"{'Given':>{given_digits}}  {'Received':>{received_digits}}"
+        + (f"  {'Tickets':>{ticket_digits}}" if show_tickets else "")
     ]
     for s, name in zip(standings, names):
         place = MEDALS.get(s.position, f"{s.position:>2}")
         marker = "  ◀" if s.player == me.player else ""
+        tickets = f"  {s.tickets:>{ticket_digits}}" if show_tickets else ""
         rows.append(
             f"{place}  {name:<{width}}  {s.points:>{digits}}   "
-            f"{s.given:>{given_digits}}  {s.received:>{received_digits}}{marker}"
+            f"{s.given:>{given_digits}}  {s.received:>{received_digits}}{tickets}{marker}"
         )
     return "```\n" + "\n".join(rows) + "\n```"
 
@@ -141,3 +151,29 @@ def _render_team_table(me: Standing, teams: Sequence[TeamStanding]) -> str:
         marker = "  ◀" if t.name == me.player.team else ""
         rows.append(f"{MEDALS[t.position]}  {t.name:<{width}}  {t.points:>{digits}}{marker}")
     return "```\n" + "\n".join(rows) + "\n```"
+
+
+def week_start(now: datetime) -> datetime:
+    """Monday 00:00 local on or before now, clipped to the 1st of the month."""
+    monday = (now - timedelta(days=now.weekday())).date()
+    first = now.date().replace(day=1)
+    return datetime.combine(max(monday, first), datetime.min.time()).astimezone()
+
+
+def render_jira_week(events: Iterable[TicketEvent], me: Player, since: datetime) -> str:
+    keys: dict[str, list[str]] = {status: [] for status in TICKET_POINTS}
+    for e in events:
+        if e.actor.lower() == me.github.lower() and e.at >= since and e.status in keys:
+            if e.key not in keys[e.status]:
+                keys[e.status].append(e.key)
+
+    lines = ["🎫 *This week in Jira*"]
+    if not any(keys.values()):
+        lines.append("No tickets moved this week.")
+        return "\n".join(lines)
+    for status, moved in keys.items():
+        if moved:
+            lines.append(f"• {status}: {len(moved)} ({', '.join(moved)}), {len(moved) * TICKET_POINTS[status]} pts")
+        else:
+            lines.append(f"• {status}: 0")
+    return "\n".join(lines)
