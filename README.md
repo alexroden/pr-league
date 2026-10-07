@@ -1,6 +1,6 @@
 # PR League
 
-A Slack bot that turns pull request reviews, and Jira ticket progress, into a monthly league. It reads a GitHub org's reviews for the current month, scores a roster of players and teams, and DMs each player a match report.
+A Slack bot that turns pull request reviews, and Jira ticket progress, into a monthly league. It reads a GitHub org's reviews for the current month, scores a roster of players and teams, and DMs each player a match report. Jira ticket scoring is built but stubbed (see below).
 
 ![Example PR League notification](example.png)
 
@@ -22,7 +22,7 @@ A Slack bot that turns pull request reviews, and Jira ticket progress, into a mo
 - Ties share a position and the next position is skipped (1, 1, 3).
 - A team's score is the sum of its members' points.
 - Ticket points go to whoever moved the ticket, not the assignee. Each (person, ticket, status) counts once, so reopening and re-closing scores nothing extra. A ticket that passes through all three statuses earns for each.
-- **Jira is stubbed for now.** Ticket scoring and rendering are implemented and tested, but real runs don't read Jira yet, so `uv run pr-league` scores PR reviews only. See `docs/superpowers/specs/2026-10-07-jira-scoring-design.md`.
+- **Jira is stubbed for now.** Ticket scoring and rendering are implemented and tested, but real runs don't read Jira yet, so `uv run pr-league` scores PR reviews only. The design, and what is deferred, is in `docs/superpowers/specs/2026-10-07-jira-scoring-design.md`.
 
 ## What the notification contains
 
@@ -32,7 +32,7 @@ A Slack bot that turns pull request reviews, and Jira ticket progress, into a mo
 - **Ticket wizard** of the month so far (most points from Jira tickets). Left out when nobody has ticket points. Demo script only for now.
 - Your position, points, and the gap to the next player up.
 - The top three players and the top three teams. Ties for third are all shown. The player table gains a Tickets column when anyone in it has ticket points.
-- **This week in Jira** and **This month in Jira** (Fridays): the tickets you moved this week (Monday to now, within the month) and this calendar month, per status, with the points they earned. Demo script only for now.
+- **This week in Jira** and **This month in Jira**, at the bottom: the tickets you moved this week (Monday to now, within the month) and this calendar month, per status, with the points they earned. Shown on Fridays. Demo script only for now.
 
 The league covers the current calendar month and is recomputed from GitHub on every run, so there is no database and nothing to reset.
 
@@ -74,13 +74,13 @@ uv run pr-league             # send a DM to each player
 
 If one DM fails it is logged and the run continues; the process exits non-zero at the end. If the GitHub fetch fails, nothing is sent.
 
-## Try it without GitHub
+## Try it without GitHub or Jira
 
-`send_test_dm.py` builds the full notification from fixture players, teams and two months of reviews. It also stubs Jira ticket transitions. It never contacts GitHub or Jira, so it runs instantly.
+`send_test_dm.py` builds the full notification from fixture players, teams, two months of reviews and stubbed Jira ticket transitions. It never contacts GitHub or Jira, so it runs instantly. The Jira blocks show on Fridays, or on any day with `--jira`.
 
 ```bash
 uv run python send_test_dm.py --mock                     # print it
-uv run python send_test_dm.py --mock --jira              # include the Friday Jira block on any day
+uv run python send_test_dm.py --mock --jira              # include the Jira blocks on any day
 uv run python send_test_dm.py                            # DM the first player in config.yaml
 uv run python send_test_dm.py --channel C0123456789      # post to a channel
 ```
@@ -93,7 +93,7 @@ To post to a channel the bot must be a member of it (`/invite @pr_league` in the
 uv run pytest
 ```
 
-Scoring, rendering and the GitHub client's retry behaviour are unit tested. The Slack client is checked by hand.
+Scoring (reviews and tickets), rendering (including the Jira blocks and the ticket wizard) and the GitHub client's retry behaviour are unit tested. The Slack client is checked by hand.
 
 ## Project layout
 
@@ -106,11 +106,12 @@ src/pr_league/
   rendering.py   pure: standings and tickets -> notification text
   slack.py       post a message
   main.py        one run: fetch, score, render, send
-docs/superpowers/ design spec and implementation plan
+docs/superpowers/ design specs and implementation plan
 ```
 
 ## Limitations
 
 - GitHub search returns at most 1,000 PRs. A busy org can exceed that, and a warning is logged when it does; scores will then be low.
 - The league is stateless. Winners are only announced for runs in the first 7 days of a month, and streaks are rebuilt by re-scoring up to the last six months, so a run in that window makes several full org fetches.
-- Runs are manual. There is no scheduler.
+- Runs are manual. There is no scheduler, so the Friday Jira blocks need something outside the bot (cron, a GitHub Actions schedule) to run it on Fridays.
+- Jira is not read yet. There is no Jira client, no Jira identity per player (the stub matches ticket movers by GitHub login), and no handling for a Jira outage. All of it is listed under Deferred in the Jira spec.
