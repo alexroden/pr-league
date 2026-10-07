@@ -1,12 +1,26 @@
 from collections.abc import Iterable, Iterator, Sequence
 
-from pr_league.models import GIVEN_POINTS, Player, ReviewEvent, Standing, TeamStanding
+from pr_league.models import (
+    GIVEN_POINTS,
+    RECEIVED_POINTS,
+    TICKET_POINTS,
+    Player,
+    ReviewEvent,
+    Standing,
+    TeamStanding,
+    TicketEvent,
+)
 
 
-def score(events: Iterable[ReviewEvent], players: Sequence[Player]) -> list[Standing]:
+def score(
+    events: Iterable[ReviewEvent],
+    players: Sequence[Player],
+    ticket_events: Iterable[TicketEvent] = (),
+) -> list[Standing]:
     roster = {p.github.lower(): p for p in players}
     given = dict.fromkeys(roster, 0)
     received = dict.fromkeys(roster, 0)
+    tickets = _ticket_points(ticket_events, roster)
     seen: set[tuple[str, str]] = set()
 
     for event in events:
@@ -21,13 +35,28 @@ def score(events: Iterable[ReviewEvent], players: Sequence[Player]) -> list[Stan
         if author in roster:
             received[author] += 1
 
-    ordered = sorted(roster, key=lambda key: (-(GIVEN_POINTS * given[key] + received[key]), key))
+    def total(key: str) -> int:
+        return GIVEN_POINTS * given[key] + RECEIVED_POINTS * received[key] + tickets[key]
+
+    ordered = sorted(roster, key=lambda key: (-total(key), key))
     return [
-        Standing(roster[key], given[key], received[key], position)
-        for key, position in zip(
-            ordered, _positions([GIVEN_POINTS * given[k] + received[k] for k in ordered])
-        )
+        Standing(roster[key], given[key], received[key], position, tickets[key])
+        for key, position in zip(ordered, _positions([total(k) for k in ordered]))
     ]
+
+
+def _ticket_points(ticket_events: Iterable[TicketEvent], roster: dict[str, Player]) -> dict[str, int]:
+    points = dict.fromkeys(roster, 0)
+    seen: set[tuple[str, str, str]] = set()
+    for event in ticket_events:
+        actor = event.actor.lower()
+        if actor not in roster or event.status not in TICKET_POINTS:
+            continue
+        if (actor, event.key, event.status) in seen:
+            continue
+        seen.add((actor, event.key, event.status))
+        points[actor] += TICKET_POINTS[event.status]
+    return points
 
 
 def rank_teams(standings: Iterable[Standing]) -> list[TeamStanding]:

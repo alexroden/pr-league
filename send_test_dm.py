@@ -3,7 +3,8 @@
 All players, teams, and both months' reviews are fixtures — no GitHub is
 contacted, so it runs instantly. You play for YOUR_TEAM. If today is within
 WINNERS_WINDOW_DAYS of the start of the month, the DM also announces the
-previous month's stubbed winners.
+previous month's stubbed winners. On Fridays, or with --jira, it ends with
+the reader's stubbed "This week in Jira" and "This month in Jira" blocks.
 """
 import argparse
 import logging
@@ -14,8 +15,8 @@ import yaml
 from dotenv import load_dotenv
 from pathlib import Path
 
-from pr_league.models import Player, ReviewEvent
-from pr_league.rendering import render_dm, render_winners
+from pr_league.models import Player, ReviewEvent, TicketEvent
+from pr_league.rendering import month_start, render_dm, render_jira_month, render_jira_week, render_winners, week_start
 from pr_league.scoring import rank_teams, score, win_streaks
 from pr_league.slack import SlackMessenger
 
@@ -23,6 +24,7 @@ log = logging.getLogger("pr_league")
 
 YOUR_TEAM = "Platform"
 WINNERS_WINDOW_DAYS = 7
+FRIDAY = 4
 
 FAKE_PLAYERS = (
     Player("sam", "U0000000001", "Platform"),
@@ -76,6 +78,43 @@ def last_month_events(now):
     ]
 
 
+def fixture_tickets(now, you):
+    """Ticket transitions this month. Most of the reader's land this week; two earlier in the month."""
+    monday = week_start(now)
+    first = month_start(now)
+
+    def moved(key, actor, status, days_ago):
+        return TicketEvent(key, actor, status, now - timedelta(days=days_ago))
+
+    def this_week(key, status, hours_after_monday):
+        return TicketEvent(key, you, status, min(now, monday + timedelta(hours=hours_after_monday)))
+
+    def earlier(key, status, hours_after_first):
+        return TicketEvent(key, you, status, min(monday, first + timedelta(hours=hours_after_first)))
+
+    return [
+        earlier("PLAT-340", "Closed", 4), earlier("PLAT-352", "Ready for production", 8),
+        this_week("PLAT-412", "QE check run", 1),
+        this_week("PLAT-415", "QE check run", 2),
+        this_week("PLAT-398", "Ready for production", 3),
+        moved("PLAT-371", "jess", "Closed", 5), moved("PLAT-371", "jess", "Ready for production", 6),
+        moved("PLAT-380", "mira", "QE check run", 4), moved("PLAT-383", "tom", "Closed", 3),
+        moved("PLAT-390", "lena", "Ready for production", 2),
+    ]
+
+
+def last_month_tickets(now):
+    """Ticket transitions last month — sam's Closed tickets don't overturn jess's win."""
+
+    def moved(key, actor, status, days_ago):
+        return TicketEvent(key, actor, status, now - timedelta(days=days_ago))
+
+    return [
+        moved("PLAT-301", "jess", "Closed", 34), moved("PLAT-305", "sam", "Closed", 33),
+        moved("PLAT-310", "ravi", "QE check run", 32),
+    ]
+
+
 # Stubbed winners of the two months before the one being announced, oldest
 # first — jess and Web won both, so they announce a 2-month streak.
 AUGUST_WINNERS = {"jess"}
@@ -92,6 +131,7 @@ def main():
         "--channel",
         help="post to a channel name or ID (e.g. #tmp-platform-hack-team-4) instead of your DM",
     )
+    parser.add_argument("--jira", action="store_true", help="show the This week in Jira block on any day")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -105,21 +145,30 @@ def main():
 
     now = datetime.now().astimezone()
     roster = (you,) + FAKE_PLAYERS
-    standings = score(fixture_events(now), roster)
+    tickets = fixture_tickets(now, you.github)
+    standings = score(fixture_events(now), roster, tickets)
     teams = rank_teams(standings)
 
     winners = ""
     if now.day <= WINNERS_WINDOW_DAYS:
-        prev_standings = score(last_month_events(now), roster)
+        prev_standings = score(last_month_events(now), roster, last_month_tickets(now))
         prev_teams = rank_teams(prev_standings)
         prev_month_name = (now.replace(day=1) - timedelta(days=1)).strftime("%B")
         streaks = win_streaks([AUGUST_WINNERS, SEPTEMBER_WINNERS])
         team_streaks = win_streaks([AUGUST_TEAM_WINNERS, SEPTEMBER_TEAM_WINNERS])
         winners = render_winners(prev_standings, prev_teams, prev_month_name, streaks, team_streaks)
 
+    jira = ""
+    if args.jira or now.weekday() == FRIDAY:
+        jira = (
+            render_jira_week(tickets, you, week_start(now))
+            + "\n\n"
+            + render_jira_month(tickets, you, month_start(now))
+        )
+
     for standing in standings:
         if standing.player == you:
-            text = render_dm(standing, standings, now.date(), teams, winners)
+            text = render_dm(standing, standings, now.date(), teams, winners, jira)
             break
     else:
         sys.exit(f"{you.github} not found in standings")

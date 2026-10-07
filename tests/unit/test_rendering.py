@@ -1,7 +1,17 @@
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
-from pr_league.models import Player, Standing, TeamStanding
-from pr_league.rendering import _render_table, _render_team_table, ordinal, render_dm, render_winners
+from pr_league.models import Player, Standing, TeamStanding, TicketEvent
+from pr_league.rendering import (
+    _render_table,
+    _render_team_table,
+    ordinal,
+    render_dm,
+    month_start,
+    render_jira_month,
+    render_jira_week,
+    render_winners,
+    week_start,
+)
 
 OCT = date(2026, 10, 3)
 
@@ -493,3 +503,173 @@ def test_player_table_pts_header_lines_up_with_the_values():
         return len(text) + sum(1 for m in medals if m in text)
     medals = ("🥇", "🥈", "🥉")
     assert display_len(header[:header.index("Pts") + 3], ()) == display_len(row[:row.index("15") + 2], medals)
+
+
+def with_tickets(login, given, received, position, tickets):
+    return Standing(Player(login, "U" + login), given, received, position, tickets)
+
+
+def test_position_line_mentions_ticket_points():
+    standings = [with_tickets("sam", 8, 7, 1, 0), with_tickets("you", 6, 4, 2, 9)]
+    text = render_dm(standings[1], standings, OCT)
+    assert "with *25 points* (6 reviews given, 4 received, 9 from tickets)." in text
+
+
+def test_position_line_leaves_out_tickets_when_zero():
+    standings = [with_tickets("you", 1, 0, 1, 0)]
+    assert "(1 review given, 0 received)." in render_dm(standings[0], standings, OCT)
+
+
+def test_table_has_a_tickets_column_when_a_top_three_player_has_ticket_points():
+    standings = [with_tickets("sam", 8, 7, 1, 3), with_tickets("you", 7, 7, 2, 0)]
+    table_text = _render_table(standings[1], standings)
+    assert " #  Player  Pts   Given  Received  Tickets" in table_text
+    assert "🥇  sam      26       8         7        3" in table_text
+    assert "🥈  You      21       7         7        0  ◀" in table_text
+
+
+def test_table_has_no_tickets_column_without_ticket_points():
+    standings = [with_tickets("sam", 8, 7, 1, 0), with_tickets("you", 7, 7, 2, 0)]
+    assert "Tickets" not in _render_table(standings[1], standings)
+
+
+def test_table_ignores_ticket_points_outside_the_top_three():
+    standings = [
+        with_tickets("sam", 9, 0, 1, 0), with_tickets("you", 8, 0, 2, 0),
+        with_tickets("alex", 7, 0, 3, 0), with_tickets("ravi", 0, 0, 4, 2),
+    ]
+    assert "Tickets" not in _render_table(standings[1], standings)
+
+
+MON = datetime(2026, 10, 5, tzinfo=timezone.utc)
+
+
+def moved(key, actor, status, days_after_monday=0):
+    return TicketEvent(key, actor, status, MON + timedelta(days=days_after_monday))
+
+
+def test_jira_week_lists_the_readers_tickets_per_status_with_points():
+    me = Player("you", "Uyou")
+    events = [
+        moved("PLAT-412", "you", "QE check run"), moved("PLAT-415", "you", "QE check run", 2),
+        moved("PLAT-398", "you", "Ready for production", 1),
+    ]
+    assert render_jira_week(events, me, MON) == "\n".join([
+        "🎫 *This week in Jira*",
+        "• QE check run: 2 (PLAT-412, PLAT-415), 4 pts",
+        "• Ready for production: 1 (PLAT-398), 2 pts",
+        "• Closed: 0",
+    ])
+
+
+def test_jira_week_says_so_when_nothing_moved():
+    assert render_jira_week([], Player("you", "Uyou"), MON) == (
+        "🎫 *This week in Jira*\nNo tickets moved this week."
+    )
+
+
+def test_jira_week_ignores_other_players_untracked_statuses_and_earlier_events():
+    me = Player("you", "Uyou")
+    events = [
+        moved("PLAT-1", "sam", "Closed"),
+        moved("PLAT-2", "you", "In Progress"),
+        moved("PLAT-3", "you", "Closed", -1),
+    ]
+    assert "No tickets moved this week." in render_jira_week(events, me, MON)
+
+
+def test_jira_week_counts_a_repeated_move_once_and_matches_the_actor_case_insensitively():
+    me = Player("you", "Uyou")
+    events = [moved("PLAT-1", "You", "Closed"), moved("PLAT-1", "you", "Closed", 1)]
+    assert "• Closed: 1 (PLAT-1), 3 pts" in render_jira_week(events, me, MON)
+
+
+def test_week_start_is_the_monday_midnight_before():
+    friday = datetime(2026, 10, 9, 16, 30).astimezone()
+    assert week_start(friday) == datetime(2026, 10, 5).astimezone()
+
+
+def test_week_start_on_a_monday_is_that_morning():
+    monday = datetime(2026, 10, 5, 9, 0).astimezone()
+    assert week_start(monday) == datetime(2026, 10, 5).astimezone()
+
+
+def test_week_start_is_clipped_to_the_first_of_the_month():
+    friday = datetime(2026, 10, 2, 12, 0).astimezone()
+    assert week_start(friday) == datetime(2026, 10, 1).astimezone()
+
+
+def test_jira_block_sits_at_the_bottom_of_the_dm():
+    standings = table(("sam", 8, 7, 1), ("you", 7, 7, 2))
+    jira = "🎫 *This week in Jira*\nNo tickets moved this week."
+    text = render_dm(standings[1], standings, OCT, jira=jira)
+    assert text.endswith("\n\n" + jira)
+    assert "This week in Jira" not in render_dm(standings[1], standings, OCT)
+
+
+FIRST = datetime(2026, 10, 1, tzinfo=timezone.utc)
+
+
+def moved_on(key, actor, status, days_after_first):
+    return TicketEvent(key, actor, status, FIRST + timedelta(days=days_after_first))
+
+
+def test_jira_month_lists_every_ticket_the_reader_moved_this_month():
+    me = Player("you", "Uyou")
+    events = [
+        moved_on("PLAT-1", "you", "Closed", 0), moved_on("PLAT-2", "you", "Closed", 8),
+        moved_on("PLAT-3", "you", "QE check run", 9),
+    ]
+    assert render_jira_month(events, me, FIRST) == "\n".join([
+        "🎫 *This month in Jira*",
+        "• QE check run: 1 (PLAT-3), 2 pts",
+        "• Ready for production: 0",
+        "• Closed: 2 (PLAT-1, PLAT-2), 6 pts",
+    ])
+
+
+def test_jira_month_says_so_when_nothing_moved():
+    assert render_jira_month([], Player("you", "Uyou"), FIRST) == (
+        "🎫 *This month in Jira*\nNo tickets moved this month."
+    )
+
+
+def test_jira_month_leaves_out_last_months_tickets_and_other_players():
+    me = Player("you", "Uyou")
+    events = [moved_on("PLAT-1", "you", "Closed", -1), moved_on("PLAT-2", "sam", "Closed", 3)]
+    assert "No tickets moved this month." in render_jira_month(events, me, FIRST)
+
+
+def test_month_start_is_midnight_on_the_first():
+    assert month_start(datetime(2026, 10, 17, 16, 30).astimezone()) == datetime(2026, 10, 1).astimezone()
+
+
+def test_ticket_wizard_names_the_player_with_the_most_ticket_points():
+    standings = [with_tickets("sam", 8, 7, 1, 5), with_tickets("you", 7, 7, 2, 9)]
+    text = render_dm(standings[0], standings, OCT)
+    assert "🧙 *Ticket wizard of the month: you (9 points)*" in text
+
+
+def test_ticket_wizard_mentions_the_reader_when_they_lead():
+    standings = [with_tickets("sam", 8, 7, 1, 5), with_tickets("you", 7, 7, 2, 9)]
+    text = render_dm(standings[1], standings, OCT)
+    assert "🧙 *Ticket wizard of the month: You (9 points)*" in text
+
+
+def test_ticket_wizard_names_tied_leaders():
+    standings = [with_tickets("sam", 8, 7, 1, 5), with_tickets("you", 7, 7, 2, 5), with_tickets("ravi", 1, 0, 3, 2)]
+    assert "Ticket wizard of the month: sam and You (5 points)*" in render_dm(standings[1], standings, OCT)
+
+
+def test_ticket_wizard_is_skipped_when_nobody_has_ticket_points():
+    standings = [with_tickets("sam", 8, 7, 1, 0), with_tickets("you", 7, 7, 2, 0)]
+    assert "Ticket wizard" not in render_dm(standings[1], standings, OCT)
+
+
+def test_ticket_wizard_sits_below_top_assists_as_its_own_section():
+    standings = [with_tickets("sam", 8, 7, 1, 5), with_tickets("you", 7, 7, 2, 9)]
+    lines = render_dm(standings[1], standings, OCT).splitlines()
+    assists = next(i for i, line in enumerate(lines) if "Top assists" in line)
+    assert lines[assists + 1] == ""
+    assert lines[assists + 2].startswith("🧙 *Ticket wizard")
+    assert lines[assists + 3:assists + 5] == ["", ""]
