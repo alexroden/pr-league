@@ -29,6 +29,7 @@ A Slack bot that turns pull request reviews, and Jira ticket progress, into a mo
 - **Winners** of the previous month (player and team, with "N months in a row" streaks). Shown on runs in the first 7 days of a month.
 - **Top scorer** of the month so far (most points).
 - **Top assists** of the month so far (most reviews given).
+- **Ticket wizard** of the month so far (most points from Jira tickets). Left out when nobody has ticket points. Demo script only for now.
 - Your position, points, and the gap to the next player up.
 - The top three players and the top three teams. Ties for third are all shown. The player table gains a Tickets column when anyone in it has ticket points.
 - **This week in Jira** and **This month in Jira** (Fridays): the tickets you moved this week (Monday to now, within the month) and this calendar month, per status, with the points they earned. Demo script only for now.

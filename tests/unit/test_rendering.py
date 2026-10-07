@@ -642,3 +642,34 @@ def test_jira_month_leaves_out_last_months_tickets_and_other_players():
 
 def test_month_start_is_midnight_on_the_first():
     assert month_start(datetime(2026, 10, 17, 16, 30).astimezone()) == datetime(2026, 10, 1).astimezone()
+
+
+def test_ticket_wizard_names_the_player_with_the_most_ticket_points():
+    standings = [with_tickets("sam", 8, 7, 1, 5), with_tickets("you", 7, 7, 2, 9)]
+    text = render_dm(standings[0], standings, OCT)
+    assert "🧙 *Ticket wizard of the month: you (9 points)*" in text
+
+
+def test_ticket_wizard_mentions_the_reader_when_they_lead():
+    standings = [with_tickets("sam", 8, 7, 1, 5), with_tickets("you", 7, 7, 2, 9)]
+    text = render_dm(standings[1], standings, OCT)
+    assert "🧙 *Ticket wizard of the month: You (9 points)*" in text
+
+
+def test_ticket_wizard_names_tied_leaders():
+    standings = [with_tickets("sam", 8, 7, 1, 5), with_tickets("you", 7, 7, 2, 5), with_tickets("ravi", 1, 0, 3, 2)]
+    assert "Ticket wizard of the month: sam and You (5 points)*" in render_dm(standings[1], standings, OCT)
+
+
+def test_ticket_wizard_is_skipped_when_nobody_has_ticket_points():
+    standings = [with_tickets("sam", 8, 7, 1, 0), with_tickets("you", 7, 7, 2, 0)]
+    assert "Ticket wizard" not in render_dm(standings[1], standings, OCT)
+
+
+def test_ticket_wizard_sits_below_top_assists_as_its_own_section():
+    standings = [with_tickets("sam", 8, 7, 1, 5), with_tickets("you", 7, 7, 2, 9)]
+    lines = render_dm(standings[1], standings, OCT).splitlines()
+    assists = next(i for i, line in enumerate(lines) if "Top assists" in line)
+    assert lines[assists + 1] == ""
+    assert lines[assists + 2].startswith("🧙 *Ticket wizard")
+    assert lines[assists + 3:assists + 5] == ["", ""]

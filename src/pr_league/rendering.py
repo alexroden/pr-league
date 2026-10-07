@@ -77,6 +77,16 @@ def render_dm(
             f"({_count(top_given, 'review')} given)*"
         )
 
+    top_tickets = max((s.tickets for s in standings), default=0)
+    if top_tickets:
+        wizard_names = " and ".join(
+            "You" if s.player == me.player else s.player.github
+            for s in standings
+            if s.tickets == top_tickets
+        )
+        lines.append("")
+        lines.append(f"🧙 *Ticket wizard of the month: {wizard_names} ({_count(top_tickets, 'point')})*")
+
     lines.append("")
     lines.append("")
 
