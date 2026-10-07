@@ -5,7 +5,7 @@ Status: Draft, awaiting review
 
 ## Purpose
 
-A proof of concept for a Slack bot that gamifies pull request reviews for a small team. Players earn points for reviewing PRs and for having their own PRs reviewed. The league table covers the current calendar month, so it resets at the start of every month. Each run DMs every player their points and their position relative to the rest of the team.
+A proof of concept for a Slack bot that gamifies pull request reviews for a small team. Players earn points for reviewing PRs (2 per review given) and for having their own PRs reviewed (1 per review received). The league table covers the current calendar month, so it resets at the start of every month. Each run DMs every player their points and their position relative to the rest of the team.
 
 The goal is to prove the idea works end to end. Details will be adjusted locally as it gets used.
 
@@ -17,8 +17,9 @@ The goal is to prove the idea works end to end. Details will be adjusted locally
 | PR source | GitHub, whole org |
 | Trigger | Run by hand from the terminal (intended weekly) |
 | Players | A few named people, listed in a config file |
-| Scoring | 1 point per PR reviewed, 1 point per reviewer on your PR. Each (reviewer, PR) pair counts once |
+| Scoring | 2 points per review given, 1 point per review received. Each (reviewer, PR) pair counts once |
 | League | Current calendar month, computed fresh from GitHub on every run |
+| Team league | Optional `team` per player. A team's points are its members' points summed. The DM shows the top 3 teams |
 | State | None. No database. |
 | Stack | Python 3.12, uv, `httpx` |
 
@@ -56,12 +57,12 @@ pr-league/
 2. **Window.** From 00:00 on the 1st of the current month (machine local time) to now. Because every run recomputes the whole month from GitHub, the monthly reset needs no code, and there is no state to corrupt or double-count.
 3. **Fetch.** `github.py` returns review events in the window: PR URL, reviewer login, PR author login, submitted-at. Pagination is handled inside this module. The API strategy (org-wide search vs. per-repo listing) is decided in the implementation plan.
 4. **Score.** For each review:
-   - A rostered reviewer gets +1 ("given").
+   - A rostered reviewer gets +2 ("given" — reviewing is the behaviour the league wants to reward).
    - A rostered PR author gets +1 ("received").
    - Self-reviews score nothing.
    - Non-rostered people score nothing, but the other side of the review still can.
    - Each (reviewer, PR) pair counts once, however many reviews the reviewer submits on that PR. GitHub records every reply in a review thread as a new review, so counting raw reviews inflated scores.
-5. **Rank.** Players are sorted by total points. Ties share a position.
+5. **Rank.** Players are sorted by total points. Ties share a position. Teams are ranked the same way on their members' summed points. Players with no `team` are left out of the team league.
 6. **DM.** Each player gets one message. If a DM fails, it's logged and the run continues to the next player. If the GitHub fetch fails, the run stops before sending anything.
 
 Trade-off: re-fetching the whole month on every run costs more GitHub API calls than an incremental approach. That's fine for a small org at weekly frequency. If it isn't, the fix is to add stored state (see Later).
@@ -69,11 +70,14 @@ Trade-off: re-fetching the whole month on every run costs more GitHub API calls 
 ### DM content
 
 > **PR League: October, week 1**
-> You're **2nd** of 5 this month with **14 points** (7 reviews given, 7 received).
+> You're **2nd** of 5 this month with **21 points** (7 reviews given, 7 received).
 > Next up: Sam, 1 point ahead of you.
 > Table: 1. Sam (15) · 2. You (14) · 3. Alex (11) …
 
-"Week N" is the week of the month the run happens in.
+> **Team league**
+> 1. Platform (21) ◀ · 2. Web (8) · 3. Data (7)
+
+"Week N" is the week of the month the run happens in. The team league lists every team placed 3rd or higher, so teams tied for 3rd all show. The reader's team is marked. The section is left out when no player has a team.
 
 ## Slack Setup
 
@@ -89,6 +93,7 @@ org: your-github-org
 players:
   - github: alexghdev
     slack: U0123ABCDEF
+    team: Platform   # optional
 ```
 
 ## CLI
@@ -100,6 +105,14 @@ players:
 
 - Unit tests (pytest) for `scoring.py` and `rendering.py`, written before the code: review scoring rules, self-review, non-rostered users, duplicates, tie ranking, ordinals (1st, 2nd, 3rd, 11th, 12th, 13th), and gap-to-next wording.
 - GitHub and Slack modules are checked by hand with `--dry-run` and a real run against the team.
+
+## Monthly winners
+
+A run in the first 7 days of a month also scores the previous month and announces its winners: each player's regular DM opens with a `🎉 *<Month> winners* — <player(s)> (N points) · Team: <team(s)> (N points)` line. Ties name every winner. Re-running inside the window re-announces, mirroring how re-running re-DMs. After day 7 the month is gone — the league is stateless by design.
+
+## Resilience
+
+GitHub requests retry up to 3 attempts with exponential backoff on connection-level failures (timeouts, dropped connections); HTTP error statuses (4xx/5xx) fail fast as before.
 
 ## Open Questions
 

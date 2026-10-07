@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -9,6 +10,20 @@ log = logging.getLogger(__name__)
 
 API = "https://api.github.com"
 SEARCH_LIMIT = 1000
+HTTP_RETRY_ATTEMPTS = 3
+RETRYABLE = (httpx.TimeoutException, httpx.RemoteProtocolError, httpx.TransportError)
+
+
+def _get(client: httpx.Client, url: str, params: dict | None = None) -> httpx.Response:
+    for attempt in range(HTTP_RETRY_ATTEMPTS):
+        try:
+            response = client.get(url, params=params)
+            response.raise_for_status()
+            return response
+        except RETRYABLE:
+            if attempt == HTTP_RETRY_ATTEMPTS - 1:
+                raise
+            time.sleep(2 ** attempt)
 
 
 class GitHubClient:
@@ -42,8 +57,7 @@ class GitHubClient:
     def _search_prs(self, org: str, since: datetime):
         day = since.astimezone(timezone.utc).date().isoformat()
         params = {"q": f"org:{org} is:pr updated:>={day}", "per_page": 100}
-        response = self._http.get("/search/issues", params=params)
-        response.raise_for_status()
+        response = _get(self._http, "/search/issues", params)
         total = response.json()["total_count"]
         if total > SEARCH_LIMIT:
             log.warning(
@@ -55,14 +69,12 @@ class GitHubClient:
             url = response.links.get("next", {}).get("url")
             if not url:
                 return
-            response = self._http.get(url)
-            response.raise_for_status()
+            response = _get(self._http, url)
 
     def _get_paged(self, url: str):
         params = {"per_page": 100}
         while url:
-            response = self._http.get(url, params=params)
-            response.raise_for_status()
+            response = _get(self._http, url, params)
             yield from response.json()
             url = response.links.get("next", {}).get("url")
             params = None
