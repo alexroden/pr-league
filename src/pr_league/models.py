@@ -1,11 +1,15 @@
 from dataclasses import dataclass
 from datetime import datetime
 
+GIVEN_POINTS = 2
+RECEIVED_POINTS = 1
+
 
 @dataclass(frozen=True)
 class Player:
     github: str
     slack: str
+    team: str | None = None
 
 
 @dataclass(frozen=True)
@@ -25,4 +29,11 @@ class Standing:
 
     @property
     def points(self) -> int:
-        return self.given + self.received
+        return GIVEN_POINTS * self.given + RECEIVED_POINTS * self.received
+
+
+@dataclass(frozen=True)
+class TeamStanding:
+    name: str
+    points: int
+    position: int

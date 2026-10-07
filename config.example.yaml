@@ -2,3 +2,4 @@ org: your-github-org
 players:
   - github: alexghdev
     slack: U0123ABCDEF
+    team: Platform        # optional; players without a team skip the team league
