@@ -21,7 +21,10 @@ def load_config(path: str | Path = "config.yaml") -> Config:
     entries = raw.get("players") or []
     if not org or not entries:
         raise ValueError(f"{path} must set 'org' and at least one entry under 'players'")
-    players = tuple(Player(github=e["github"], slack=e["slack"], team=e.get("team")) for e in entries)
+    players = tuple(
+        Player(github=e["github"], slack=e.get("slack"), team=e.get("team"), jira=e.get("jira"))
+        for e in entries
+    )
     github_token = os.environ.get("GITHUB_TOKEN")
     if not github_token:
         raise ValueError("GITHUB_TOKEN is not set (see .env.example)")

@@ -69,6 +69,9 @@ def run(config: Config, github: GitHubClient, messenger: SlackMessenger | None, 
 
     failures = 0
     for standing in standings:
+        if standing.player.slack is None:
+            log.warning("No Slack ID for %s, skipping their DM", standing.player.github)
+            continue
         text = render_dm(standing, standings, now.date(), teams, winners)
         if messenger is None:
             print(f"--- would DM {standing.player.github} ({standing.player.slack}) ---\n{text}\n")
