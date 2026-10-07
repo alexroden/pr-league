@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from datetime import date
 
-from pr_league.models import Standing
+from pr_league.models import Standing, TeamStanding
 
 
 def ordinal(n: int) -> str:
@@ -16,9 +16,68 @@ def _count(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
-def render_dm(me: Standing, standings: Sequence[Standing], today: date) -> str:
+def render_winners(
+    standings: Sequence[Standing],
+    teams: Sequence[TeamStanding],
+    month: str,
+    streaks: dict[str, int] | None = None,
+    team_streaks: dict[str, int] | None = None,
+) -> str:
+    streaks = streaks or {}
+    team_streaks = team_streaks or {}
+
+    lines = [f"🎉 *{month} winners*", ""]
+    for s in standings:
+        if s.position == 1:
+            lines.append(f"🏆 {s.player.github} ({_count(s.points, 'point')}){_streak(s.player.github, streaks)}")
+    for t in teams:
+        if t.position == 1:
+            lines.append(f"🏆 Team: {t.name} ({_count(t.points, 'point')}){_streak(t.name, team_streaks)}")
+    return "\n".join(lines)
+
+
+def _streak(name: str, streaks: dict[str, int]) -> str:
+    count = streaks.get(name, 1)
+    return "" if count == 1 else f" — {count} months in a row"
+
+
+def render_dm(
+    me: Standing,
+    standings: Sequence[Standing],
+    today: date,
+    teams: Sequence[TeamStanding] = (),
+    winners: str = "",
+) -> str:
     week = (today.day - 1) // 7 + 1
-    lines = [f"*PR League: {today.strftime('%B')}, week {week}*"]
+    lines = [f"🏆 *PR League: {today.strftime('%B')}, week {week}*"]
+    if winners:
+        lines.append("")
+        lines.append(winners)
+
+    leaders = [s for s in standings if s.position == 1]
+    if leaders:
+        leader_names = " and ".join(
+            "You" if s.player == me.player else s.player.github for s in leaders
+        )
+        lines.append("")
+        lines.append(
+            f"⚽ *Top scorer of the month: {leader_names} "
+            f"({_count(leaders[0].points, 'point')})*"
+        )
+    top_given = max((s.given for s in standings), default=0)
+    assist_leaders = [s for s in standings if s.given == top_given]
+    if assist_leaders:
+        assist_names = " and ".join(
+            "You" if s.player == me.player else s.player.github for s in assist_leaders
+        )
+        lines.append("")
+        lines.append(
+            f"👟 *Top assists of the month: {assist_names} "
+            f"({_count(top_given, 'review')} given)*"
+        )
+
+    lines.append("")
+    lines.append("")
 
     tied = sum(1 for s in standings if s.position == me.position) > 1
     place = ("joint " if tied else "") + ordinal(me.position)
@@ -33,11 +92,52 @@ def render_dm(me: Standing, standings: Sequence[Standing], today: date) -> str:
         next_up = [s for s in standings if s.position == nearest]
         names = " and ".join(s.player.github for s in next_up)
         gap = next_up[0].points - me.points
-        lines.append(f"Next up: {names}, {_count(gap, 'point')} ahead of you.")
+        lines.append(f"⬆️ Next up: {names}, {_count(gap, 'point')} ahead of you.")
 
-    rows = " · ".join(
-        f"{s.position}. {'You' if s.player == me.player else s.player.github} ({s.points})"
-        for s in standings
-    )
-    lines.append(f"Table: {rows}")
+    lines.append("")
+    lines.append(_render_table(me, standings))
+
+    podium = [t for t in teams if t.position <= TEAM_PODIUM]
+    if podium:
+        lines.append("")
+        lines.append("*Team league*")
+        lines.append("")
+        lines.append(_render_team_table(me, podium))
     return "\n".join(lines)
+
+
+MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
+TEAM_PODIUM = 3
+
+
+def _render_table(me: Standing, standings: Sequence[Standing]) -> str:
+    standings = [s for s in standings if s.position <= TEAM_PODIUM]
+    names = ["You" if s.player == me.player else s.player.github for s in standings]
+    width = max(len("Player"), max(len(name) for name in names))
+    points = max(s.points for s in standings)
+    digits = max(len("Pts"), len(str(points)))
+
+    given_digits = max(len("Given"), max(len(str(s.given)) for s in standings))
+    received_digits = max(len("Received"), max(len(str(s.received)) for s in standings))
+    rows = [
+        f" #  {'Player':<{width}}  {'Pts':>{digits}}   "
+        f"{'Given':>{given_digits}}  {'Received':>{received_digits}}"
+    ]
+    for s, name in zip(standings, names):
+        place = MEDALS.get(s.position, f"{s.position:>2}")
+        marker = "  ◀" if s.player == me.player else ""
+        rows.append(
+            f"{place}  {name:<{width}}  {s.points:>{digits}}   "
+            f"{s.given:>{given_digits}}  {s.received:>{received_digits}}{marker}"
+        )
+    return "```\n" + "\n".join(rows) + "\n```"
+
+
+def _render_team_table(me: Standing, teams: Sequence[TeamStanding]) -> str:
+    width = max(len("Team"), max(len(t.name) for t in teams))
+    digits = max(len("Pts"), *(len(str(t.points)) for t in teams))
+    rows = [f" #  {'Team':<{width}}  {'Pts':>{digits}}"]
+    for t in teams:
+        marker = "  ◀" if t.name == me.player.team else ""
+        rows.append(f"{MEDALS[t.position]}  {t.name:<{width}}  {t.points:>{digits}}{marker}")
+    return "```\n" + "\n".join(rows) + "\n```"
