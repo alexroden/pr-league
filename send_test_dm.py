@@ -4,7 +4,7 @@ All players, teams, and both months' reviews are fixtures — no GitHub is
 contacted, so it runs instantly. You play for YOUR_TEAM. If today is within
 WINNERS_WINDOW_DAYS of the start of the month, the DM also announces the
 previous month's stubbed winners. On Fridays, or with --jira, it ends with
-the reader's stubbed "This week in Jira" block.
+the reader's stubbed "This week in Jira" and "This month in Jira" blocks.
 """
 import argparse
 import logging
@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 from pr_league.models import Player, ReviewEvent, TicketEvent
-from pr_league.rendering import render_dm, render_jira_week, render_winners, week_start
+from pr_league.rendering import month_start, render_dm, render_jira_month, render_jira_week, render_winners, week_start
 from pr_league.scoring import rank_teams, score, win_streaks
 from pr_league.slack import SlackMessenger
 
@@ -79,8 +79,9 @@ def last_month_events(now):
 
 
 def fixture_tickets(now, you):
-    """Ticket transitions this month. The reader's land this week; Closed is left empty for them."""
+    """Ticket transitions this month. Most of the reader's land this week; two earlier in the month."""
     monday = week_start(now)
+    first = month_start(now)
 
     def moved(key, actor, status, days_ago):
         return TicketEvent(key, actor, status, now - timedelta(days=days_ago))
@@ -88,7 +89,11 @@ def fixture_tickets(now, you):
     def this_week(key, status, hours_after_monday):
         return TicketEvent(key, you, status, min(now, monday + timedelta(hours=hours_after_monday)))
 
+    def earlier(key, status, hours_after_first):
+        return TicketEvent(key, you, status, min(monday, first + timedelta(hours=hours_after_first)))
+
     return [
+        earlier("PLAT-340", "Closed", 4), earlier("PLAT-352", "Ready for production", 8),
         this_week("PLAT-412", "QE check run", 1),
         this_week("PLAT-415", "QE check run", 2),
         this_week("PLAT-398", "Ready for production", 3),
@@ -155,7 +160,11 @@ def main():
 
     jira = ""
     if args.jira or now.weekday() == FRIDAY:
-        jira = render_jira_week(tickets, you, week_start(now))
+        jira = (
+            render_jira_week(tickets, you, week_start(now))
+            + "\n\n"
+            + render_jira_month(tickets, you, month_start(now))
+        )
 
     for standing in standings:
         if standing.player == you:

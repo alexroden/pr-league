@@ -160,16 +160,28 @@ def week_start(now: datetime) -> datetime:
     return datetime.combine(max(monday, first), datetime.min.time()).astimezone()
 
 
+def month_start(now: datetime) -> datetime:
+    return datetime.combine(now.date().replace(day=1), datetime.min.time()).astimezone()
+
+
 def render_jira_week(events: Iterable[TicketEvent], me: Player, since: datetime) -> str:
+    return _render_jira("This week in Jira", "week", events, me, since)
+
+
+def render_jira_month(events: Iterable[TicketEvent], me: Player, since: datetime) -> str:
+    return _render_jira("This month in Jira", "month", events, me, since)
+
+
+def _render_jira(title: str, period: str, events: Iterable[TicketEvent], me: Player, since: datetime) -> str:
     keys: dict[str, list[str]] = {status: [] for status in TICKET_POINTS}
     for e in events:
         if e.actor.lower() == me.github.lower() and e.at >= since and e.status in keys:
             if e.key not in keys[e.status]:
                 keys[e.status].append(e.key)
 
-    lines = ["🎫 *This week in Jira*"]
+    lines = [f"🎫 *{title}*"]
     if not any(keys.values()):
-        lines.append("No tickets moved this week.")
+        lines.append(f"No tickets moved this {period}.")
         return "\n".join(lines)
     for status, moved in keys.items():
         if moved:

@@ -6,6 +6,8 @@ from pr_league.rendering import (
     _render_team_table,
     ordinal,
     render_dm,
+    month_start,
+    render_jira_month,
     render_jira_week,
     render_winners,
     week_start,
@@ -603,3 +605,40 @@ def test_jira_block_sits_at_the_bottom_of_the_dm():
     text = render_dm(standings[1], standings, OCT, jira=jira)
     assert text.endswith("\n\n" + jira)
     assert "This week in Jira" not in render_dm(standings[1], standings, OCT)
+
+
+FIRST = datetime(2026, 10, 1, tzinfo=timezone.utc)
+
+
+def moved_on(key, actor, status, days_after_first):
+    return TicketEvent(key, actor, status, FIRST + timedelta(days=days_after_first))
+
+
+def test_jira_month_lists_every_ticket_the_reader_moved_this_month():
+    me = Player("you", "Uyou")
+    events = [
+        moved_on("PLAT-1", "you", "Closed", 0), moved_on("PLAT-2", "you", "Closed", 8),
+        moved_on("PLAT-3", "you", "QE check run", 9),
+    ]
+    assert render_jira_month(events, me, FIRST) == "\n".join([
+        "🎫 *This month in Jira*",
+        "• QE check run: 1 (PLAT-3), 2 pts",
+        "• Ready for production: 0",
+        "• Closed: 2 (PLAT-1, PLAT-2), 6 pts",
+    ])
+
+
+def test_jira_month_says_so_when_nothing_moved():
+    assert render_jira_month([], Player("you", "Uyou"), FIRST) == (
+        "🎫 *This month in Jira*\nNo tickets moved this month."
+    )
+
+
+def test_jira_month_leaves_out_last_months_tickets_and_other_players():
+    me = Player("you", "Uyou")
+    events = [moved_on("PLAT-1", "you", "Closed", -1), moved_on("PLAT-2", "sam", "Closed", 3)]
+    assert "No tickets moved this month." in render_jira_month(events, me, FIRST)
+
+
+def test_month_start_is_midnight_on_the_first():
+    assert month_start(datetime(2026, 10, 17, 16, 30).astimezone()) == datetime(2026, 10, 1).astimezone()
