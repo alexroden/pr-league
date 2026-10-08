@@ -181,7 +181,29 @@ src/pr_league/
 docs/adr/         architecture decision records
 docs/superpowers/ design specs and implementation plan
 infra/            Terraform for the teams table and its IAM policies
+Dockerfile, compose.yaml, docker-entrypoint.sh   run the CLI against a local DynamoDB
 ```
+
+## Running it locally in Docker
+
+This starts a local DynamoDB and runs the CLI against it, so you can try every command without touching AWS. The container uses dummy AWS credentials and a local endpoint, so it can't reach your real table. `SLACK_BOT_TOKEN` is blanked inside it, so nothing can send a Slack message.
+
+```bash
+docker compose up -d --wait dynamodb          # start the local database (data is kept in a volume)
+
+alias prl='docker compose --progress quiet run --rm app pr-league-admin'
+prl teams add --empty Platform
+prl members add Platform alexghdev --slack U0123ABCDEF
+prl teams list Platform
+
+docker compose down                           # stop; your teams are kept
+docker compose down -v                        # stop and wipe the local database
+```
+
+- The `pr-league-teams` table is created on the first command, with the same schema as `infra/`.
+- The container reads your `.env`, so the Jira commands (`teams add`, `link`, `sync`, `members move`) call your **real** Atlassian site and GitHub, but write only to the local table. They need `ATLASSIAN_SITE_ID` in `.env`; the other four `ATLASSIAN_*` values are already listed above.
+- Other tools run the same way: `docker compose run --rm app pr-league --dry-run`, or `docker compose run --rm app python send_test_dm.py --me alexghdev --mock`. The first reads real GitHub reviews.
+- Code changes need `docker compose build app` before they show up in the container.
 
 ## Infrastructure
 

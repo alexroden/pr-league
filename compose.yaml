@@ -1,0 +1,33 @@
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/data"]
+    user: root
+    volumes:
+      - dynamodb-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:8000 || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  app:
+    build: .
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AWS_ENDPOINT_URL: http://dynamodb:8000
+      AWS_DEFAULT_REGION: eu-west-2
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      PR_LEAGUE_TABLE: pr-league-teams
+      SLACK_BOT_TOKEN: ""
+    entrypoint: ["/app/docker-entrypoint.sh"]
+    profiles: ["tools"]
+
+volumes:
+  dynamodb-data:

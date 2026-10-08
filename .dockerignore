@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+config.yaml
+roster.derived.yaml
+.git
+.venv
+__pycache__
+.pytest_cache
+.coverage
+.terraform
+*.tfstate
+*.tfstate.*
+.DS_Store
+infra
+docs
+tests
