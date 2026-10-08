@@ -18,23 +18,31 @@ class AmbiguousTeam(JiraError):
     pass
 
 
+MEMBERS_PAGE_SIZE = 50
+
+
 class JiraClient:
-    def __init__(self, http: httpx.Client, org_id: str):
+    def __init__(self, http: httpx.Client, org_id: str, site_id: str):
         self._http = http
         self._org = org_id
+        self._site = site_id
 
-    def _get(self, path: str, params: dict | None = None):
-        response = self._http.get(path, params=params)
+    def _request(self, method: str, path: str, params: dict | None = None, body: dict | None = None):
+        response = self._http.request(method, path, params=params, json=body)
         if response.status_code >= 400:
             raise JiraError(f"Atlassian returned {response.status_code} for {path}")
         return response.json()
+
+    def _get(self, path: str, params: dict | None = None):
+        return self._request("GET", path, params)
 
     def find_team(self, name: str) -> str:
         wanted = name.casefold()
         matches: list[tuple[str, str]] = []
         cursor = None
         while True:
-            page = self._get(TEAMS_PATH.format(org=self._org), {"cursor": cursor} if cursor else None)
+            params = {"siteId": self._site, **({"cursor": cursor} if cursor else {})}
+            page = self._get(TEAMS_PATH.format(org=self._org), params)
             matches += [
                 (t["displayName"], t["teamId"]) for t in page["entities"] if t["displayName"].casefold() == wanted
             ]
@@ -51,9 +59,11 @@ class JiraClient:
         accounts: list[str] = []
         cursor = None
         while True:
-            page = self._get(
+            page = self._request(
+                "POST",
                 TEAM_MEMBERS_PATH.format(org=self._org, team=team_id),
-                {"cursor": cursor} if cursor else None,
+                {"siteId": self._site},
+                {"first": MEMBERS_PAGE_SIZE, **({"after": cursor} if cursor else {})},
             )
             accounts += [m["accountId"] for m in page["results"]]
             cursor = page["pageInfo"].get("endCursor")

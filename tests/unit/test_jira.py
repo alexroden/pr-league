@@ -16,7 +16,7 @@ def make(routes, seen=None):
         return httpx.Response(200, json=reply, request=request)
 
     http = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://acme.atlassian.net")
-    return JiraClient(http, org_id="org-1")
+    return JiraClient(http, org_id="org-1", site_id="site-1")
 
 
 def teams_page(*names_and_ids, cursor=None):
@@ -53,10 +53,20 @@ def test_find_team_follows_the_cursor_across_pages():
     assert jira.find_team("Web") == "t2"
 
 
-def test_team_members_follows_pagination():
+def test_team_members_follows_pagination_by_posting_the_cursor_as_after():
+    import json
+
     pages = {None: members_page("a1", "a2", cursor="c1"), "c1": members_page("a3")}
-    jira = make(lambda r: pages[r.url.params.get("cursor")])
+    bodies = []
+
+    def route(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        return pages[body.get("after")]
+
+    jira = make(route)
     assert jira.team_members(TEAM_ID) == ["a1", "a2", "a3"]
+    assert bodies == [{"first": 50}, {"first": 50, "after": "c1"}]
 
 
 def test_developers_keeps_only_active_members_of_the_developers_group():
@@ -91,8 +101,22 @@ def test_an_http_error_is_reported_with_its_status_and_not_treated_as_empty(stat
         jira.find_team("Web")
 
 
-def test_requests_use_the_org_in_the_teams_path():
+def test_requests_use_the_org_in_the_path_and_the_site_id_in_the_query():
     seen = []
     jira = make(lambda r: teams_page(("Web", "t1")), seen)
     jira.find_team("Web")
     assert "org-1" in seen[0].url.path
+    assert seen[0].url.params["siteId"] == "site-1"
+
+
+def test_members_are_listed_with_a_post_that_carries_the_site_id():
+    seen = []
+    jira = make(lambda r: members_page("a1"), seen)
+    jira.team_members(TEAM_ID)
+    assert (seen[0].method, seen[0].url.params["siteId"]) == ("POST", "site-1")
+
+
+def test_the_members_page_size_stays_within_the_limit_atlassian_accepts():
+    from pr_league.jira import MEMBERS_PAGE_SIZE
+
+    assert MEMBERS_PAGE_SIZE <= 50

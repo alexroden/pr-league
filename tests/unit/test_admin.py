@@ -302,12 +302,16 @@ def test_teams_add_empty_never_needs_jira(table):
 def test_building_the_clients_names_each_missing_credential(monkeypatch):
     from pr_league.admin import build_clients
 
-    for name in ("ATLASSIAN_SITE", "ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN", "ATLASSIAN_ORG_ID", "GITHUB_TOKEN"):
+    for name in ("ATLASSIAN_SITE", "ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN", "ATLASSIAN_ORG_ID", "ATLASSIAN_SITE_ID", "GITHUB_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(AdminError, match="ATLASSIAN_SITE"):
         build_clients()
     monkeypatch.setenv("ATLASSIAN_SITE", "acme.atlassian.net")
     with pytest.raises(AdminError, match="ATLASSIAN_EMAIL"):
+        build_clients()
+    for name in ("ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN", "ATLASSIAN_ORG_ID"):
+        monkeypatch.setenv(name, "x")
+    with pytest.raises(AdminError, match="ATLASSIAN_SITE_ID"):
         build_clients()
 
 
@@ -316,7 +320,7 @@ def test_building_the_clients_succeeds_when_every_credential_is_set(monkeypatch)
     from pr_league.jira import JiraClient
     from pr_league.matching import CommitSearch
 
-    for name in ("ATLASSIAN_SITE", "ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN", "ATLASSIAN_ORG_ID", "GITHUB_TOKEN"):
+    for name in ("ATLASSIAN_SITE", "ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN", "ATLASSIAN_ORG_ID", "ATLASSIAN_SITE_ID", "GITHUB_TOKEN"):
         monkeypatch.setenv(name, "x")
     jira, search = build_clients()
     assert isinstance(jira, JiraClient) and isinstance(search, CommitSearch)
@@ -606,3 +610,11 @@ def test_someone_newly_added_by_a_sync_starts_in_the_league(table):
     seed(table, "Web", jira_team="Web")
     sync_run(table, jira_team(("Web", ["a1"])), FakeSearch({"a1@acme.com": "alice"}), "teams", "sync", "Web")
     assert "out_of_league" not in stored(table, "Web")["members"][0]
+
+
+def test_a_dry_run_words_actions_as_would_but_reports_are_not_prefixed(table, capsys):
+    jira = jira_team(("Web", ["a1", "a2"]))
+    jira_run(table, jira, FakeSearch({"a1@acme.com": "alice"}), "teams", "add", "Web", "--dry-run")
+    lines = capsys.readouterr().out.splitlines()
+    assert "would add alice to Web" in lines
+    assert "a2 could not be matched to a GitHub login for Web" in lines

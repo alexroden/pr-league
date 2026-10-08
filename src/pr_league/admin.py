@@ -102,17 +102,18 @@ def _resolver(jira, search):
     return resolve
 
 
-def _print_plan(plan: Plan, prefix: str = "") -> None:
+def _print_plan(plan: Plan, dry_run: bool = False) -> None:
+    would = "would " if dry_run else ""
     for add in plan.adds:
-        print(f"{prefix}add {add.github} to {add.team}")
+        print(f"{would}add {add.github} to {add.team}")
     for move in plan.moves:
-        print(f"{prefix}move {move.github} from {move.source} to {move.target}")
+        print(f"{would}move {move.github} from {move.source} to {move.target}")
     for remove in plan.removes:
-        print(f"{prefix}remove {remove.github} from {remove.team}")
+        print(f"{would}remove {remove.github} from {remove.team}")
     for skip in plan.skips:
-        print(f"{prefix}{skip.jira} stays on {skip.on}, not {skip.team}")
+        print(f"{skip.jira} stays on {skip.on}, not {skip.team}")
     for miss in plan.unmatched:
-        print(f"{prefix}{miss.jira} could not be matched to a GitHub login for {miss.team}")
+        print(f"{miss.jira} could not be matched to a GitHub login for {miss.team}")
 
 
 def teams_add(table, args, jira=None, search=None, confirm=None) -> None:
@@ -131,7 +132,7 @@ def teams_add(table, args, jira=None, search=None, confirm=None) -> None:
         )
     except (JiraError, SearchFailed) as error:
         raise AdminError(str(error)) from error
-    _print_plan(plan, "would " if args.dry_run else "")
+    _print_plan(plan, args.dry_run)
     if args.dry_run:
         return
     members = [{"github": a.github, "jira": a.jira, "source": "jira"} for a in plan.adds]
@@ -200,7 +201,7 @@ def teams_sync(table, args, jira=None, search=None, confirm=None) -> None:
         plan = plan_sync(teams, _developers(jira, teams, {t.name for t in teams if t.jira_team}), _resolver(jira, search), scope)
     except (JiraError, SearchFailed) as error:
         raise AdminError(str(error)) from error
-    _print_plan(plan, "would " if args.dry_run else "")
+    _print_plan(plan, args.dry_run)
     if args.dry_run:
         return
     if plan.removes and not args.yes:
@@ -491,6 +492,7 @@ def build_clients() -> tuple[JiraClient, CommitSearch]:
     jira = JiraClient(
         httpx.Client(base_url=f"https://{site}", auth=(email, _env("ATLASSIAN_API_TOKEN")), timeout=30),
         _env("ATLASSIAN_ORG_ID"),
+        _env("ATLASSIAN_SITE_ID"),
     )
     search = CommitSearch(
         httpx.Client(
