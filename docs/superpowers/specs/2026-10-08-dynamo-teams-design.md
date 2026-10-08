@@ -26,7 +26,7 @@ The container, schedule, secrets and Jira integration are later steps and out of
 - No container image, ECS task, EventBridge schedule or Secrets Manager wiring.
 - No change to scoring, rendering, casting or the `Player` model.
 - No Slack-driven roster editing.
-- No YAML import command (open question below).
+- No sync from YAML. `pr-league-admin import` only adds players from a file, once; it never updates or removes.
 - No stored league state. The bot stays stateless.
 
 ## Data Model
@@ -56,6 +56,7 @@ Behaviour changes:
   - `members add <team> <github> [--slack U…] [--jira …]`
   - `members remove <github>`
   - `members move <github> <team>`
+  - `import <file> [--dry-run]`: add the players in a roster YAML file. Players already on the right team are skipped, a login on a different team stops the import, and nothing is written if any check fails. New teams and additions go in one transaction.
 
   Writes are conditional. `members move` is one transaction across two items. `members add` rejects a login that exists in any team.
 - `main.py`. The `--config` flag is removed.
@@ -82,7 +83,7 @@ TDD. Unit tier under `tests/unit/`, with `moto` faking DynamoDB at the AWS bound
 
 ## Dependencies
 
-Add `boto3`. Remove `pyyaml`. Add dev dependencies `moto[dynamodb]` and `pytest-cov`.
+Add `boto3`. `pyyaml` stays, for `import`. Add dev dependencies `moto[dynamodb]` and `pytest-cov`.
 
 ## Files Removed Or Rewritten
 
@@ -91,6 +92,6 @@ Add `boto3`. Remove `pyyaml`. Add dev dependencies `moto[dynamodb]` and `pytest-
 ## Risks And Open Questions
 
 - Local runs and `send_test_dm.py` now need AWS credentials, or a moto-backed table. That follows from dropping YAML.
-- The current local `config.yaml` has real members. A one-off `pr-league-admin import config.yaml` would save re-typing them but would keep a YAML dependency. Left out unless you want it.
+- Local `config.yaml` and `roster.derived.yaml` hold real member IDs. Load `roster.derived.yaml` with `pr-league-admin import`, then delete both files.
 - Where Arbor ADRs live is unconfirmed. ADR 0001 is in this repo's `docs/adr/` for now.
 - Terraform is unvalidated: `terraform` isn't installed on the machine it was written on, so `terraform validate` and `plan` haven't run.

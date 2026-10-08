@@ -6,6 +6,7 @@ dependencies = [
     "httpx>=0.27",
     "python-dotenv>=1",
     "boto3>=1.43.109",
+    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]

@@ -144,3 +144,106 @@ def test_a_write_that_loses_a_race_is_reported(table):
     table.get_item = stale_then_concurrent_edit
     with pytest.raises(AdminError, match="changed while"):
         run(table, "members", "remove", "sam")
+
+
+def roster_file(tmp_path, body):
+    path = tmp_path / "roster.yaml"
+    path.write_text(body)
+    return str(path)
+
+
+ROSTER = """\
+org: acme
+players:
+  - github: sam
+    slack: U1
+    jira: 712020:abc
+    team: Web
+  - github: jess
+    slack: null
+    team: Web
+  - github: mo
+    team: Data
+"""
+
+
+def test_import_creates_teams_and_members_without_empty_identities(table, tmp_path):
+    run(table, "import", roster_file(tmp_path, ROSTER))
+    assert members(table, "Web") == [
+        {"github": "sam", "slack": "U1", "jira": "712020:abc"},
+        {"github": "jess"},
+    ]
+    assert members(table, "Data") == [{"github": "mo"}]
+    assert len(load_players(table)) == 3
+
+
+def test_import_adds_to_an_existing_team_and_keeps_its_members(table, tmp_path):
+    run(table, "teams", "add", "Web")
+    run(table, "members", "add", "Web", "amy", "--slack", "U9")
+    run(table, "import", roster_file(tmp_path, ROSTER))
+    assert [m["github"] for m in members(table, "Web")] == ["amy", "sam", "jess"]
+
+
+def test_import_twice_changes_nothing_the_second_time(table, tmp_path, capsys):
+    path = roster_file(tmp_path, ROSTER)
+    run(table, "import", path)
+    before = (members(table, "Web"), members(table, "Data"))
+    capsys.readouterr()
+    run(table, "import", path)
+    assert (members(table, "Web"), members(table, "Data")) == before
+    assert "Imported 0 members" in capsys.readouterr().out
+
+
+def test_import_reports_what_it_did(table, tmp_path, capsys):
+    run(table, "teams", "add", "Web")
+    run(table, "import", roster_file(tmp_path, ROSTER))
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "Imported 3 members into 2 teams (1 created); 0 already present."
+    )
+
+
+def test_import_rejects_a_login_that_is_on_another_team_and_writes_nothing(table, tmp_path):
+    run(table, "teams", "add", "Ops")
+    run(table, "members", "add", "Ops", "Sam")
+    with pytest.raises(AdminError, match="sam is already on Ops, not Web"):
+        run(table, "import", roster_file(tmp_path, ROSTER))
+    assert members(table, "Ops") == [{"github": "Sam"}]
+    assert "Item" not in table.get_item(Key={"team": "Data"})
+
+
+def test_import_rejects_a_player_without_a_team_and_writes_nothing(table, tmp_path):
+    body = ROSTER + "  - github: kim\n    slack: U7\n"
+    with pytest.raises(AdminError, match="kim has no team"):
+        run(table, "import", roster_file(tmp_path, body))
+    assert table.scan()["Items"] == []
+
+
+def test_import_rejects_a_login_listed_twice_ignoring_case(table, tmp_path):
+    body = ROSTER + "  - github: SAM\n    team: Data\n"
+    with pytest.raises(AdminError, match="sam appears twice"):
+        run(table, "import", roster_file(tmp_path, body))
+    assert table.scan()["Items"] == []
+
+
+def test_import_rejects_a_player_without_a_github_login(table, tmp_path):
+    with pytest.raises(AdminError, match="no github login"):
+        run(table, "import", roster_file(tmp_path, "players:\n  - slack: U1\n    team: Web\n"))
+
+
+@pytest.mark.parametrize("body", ["org: acme\n", "", "- just\n- a list\n"])
+def test_import_rejects_a_file_with_no_players(table, tmp_path, body):
+    with pytest.raises(AdminError, match="no players"):
+        run(table, "import", roster_file(tmp_path, body))
+
+
+def test_import_rejects_a_missing_file(table, tmp_path):
+    with pytest.raises(AdminError, match="nope.yaml"):
+        run(table, "import", str(tmp_path / "nope.yaml"))
+
+
+def test_import_dry_run_prints_the_plan_and_writes_nothing(table, tmp_path, capsys):
+    run(table, "import", "--dry-run", roster_file(tmp_path, ROSTER))
+    out = capsys.readouterr().out
+    assert "Web (new): sam, jess" in out
+    assert out.splitlines()[-1].startswith("Would import 3 members into 2 teams (2 created)")
+    assert table.scan()["Items"] == []

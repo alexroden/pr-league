@@ -1,7 +1,10 @@
 import argparse
 import os
 import sys
+from contextlib import contextmanager
+from pathlib import Path
 
+import yaml
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
@@ -37,17 +40,23 @@ def _set_members_update(table_name: str, team: str, old: list[dict], new: list[d
     }
 
 
-def _write(table, *updates: dict) -> None:
+@contextmanager
+def _lost_race():
     try:
-        if len(updates) == 1:
-            table.update_item(**{k: v for k, v in updates[0].items() if k != "TableName"})
-        else:
-            table.meta.client.transact_write_items(TransactItems=[{"Update": u} for u in updates])
+        yield
     except ClientError as error:
         code = error.response["Error"]["Code"]
         if code in ("ConditionalCheckFailedException", "TransactionCanceledException"):
             raise AdminError("the team changed while this command ran; try again") from error
         raise
+
+
+def _write(table, *updates: dict) -> None:
+    with _lost_race():
+        if len(updates) == 1:
+            table.update_item(**{k: v for k, v in updates[0].items() if k != "TableName"})
+        else:
+            table.meta.client.transact_write_items(TransactItems=[{"Update": u} for u in updates])
 
 
 def teams_list(table, _args) -> None:
@@ -119,6 +128,79 @@ def members_move(table, args) -> None:
     )
 
 
+def _read_roster(path: str) -> list[tuple[str, dict]]:
+    try:
+        raw = yaml.safe_load(Path(path).read_text())
+    except (OSError, yaml.YAMLError) as error:
+        raise AdminError(f"{path}: {error}") from error
+    entries = raw.get("players") if isinstance(raw, dict) else None
+    if not entries:
+        raise AdminError(f"{path} has no players")
+    seen: set[str] = set()
+    players = []
+    for entry in entries:
+        github = entry.get("github") if isinstance(entry, dict) else None
+        if not github:
+            raise AdminError(f"{path} has a player with no github login")
+        key = str(github).lower()
+        if not entry.get("team"):
+            raise AdminError(f"{key} has no team in {path}")
+        if key in seen:
+            raise AdminError(f"{key} appears twice in {path}")
+        seen.add(key)
+        member = {"github": str(github)}
+        for field in ("slack", "jira"):
+            if entry.get(field):
+                member[field] = str(entry[field])
+        players.append((str(entry["team"]), member))
+    return players
+
+
+def import_roster(table, args) -> None:
+    players = _read_roster(args.file)
+    teams = {item["team"]: item.get("members", []) for item in scan_teams(table)}
+    owner = {m["github"].lower(): team for team, members in teams.items() for m in members}
+
+    additions: dict[str, list[dict]] = {}
+    present = 0
+    for team, member in players:
+        key = member["github"].lower()
+        if key in owner and owner[key] != team:
+            raise AdminError(f"{key} is already on {owner[key]}, not {team}")
+        if key in owner:
+            present += 1
+        else:
+            additions.setdefault(team, []).append(member)
+
+    in_file = {team for team, _ in players}
+    created = in_file - teams.keys()
+    added = sum(len(members) for members in additions.values())
+    summary = f"{added} members into {len(in_file)} teams ({len(created)} created); {present} already present."
+
+    if args.dry_run:
+        for team, members in additions.items():
+            print(f"{team}{' (new)' if team in created else ''}: {', '.join(m['github'] for m in members)}")
+        print(f"Would import {summary}")
+        return
+
+    items = []
+    for team, members in additions.items():
+        if team in teams:
+            update = _set_members_update(table.name, team, teams[team], [*teams[team], *members])
+            items.append({"Update": update})
+        else:
+            put = {
+                "TableName": table.name,
+                "Item": {"team": team, "members": members},
+                "ConditionExpression": "attribute_not_exists(team)",
+            }
+            items.append({"Put": put})
+    if items:
+        with _lost_race():
+            table.meta.client.transact_write_items(TransactItems=items)
+    print(f"Imported {summary}")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pr-league-admin", description="Manage the league's teams")
     groups = parser.add_subparsers(dest="group", required=True)
@@ -144,6 +226,11 @@ def _parser() -> argparse.ArgumentParser:
     move.add_argument("github")
     move.add_argument("team")
     move.set_defaults(handler=members_move)
+
+    load = groups.add_parser("import", help="add the players in a roster YAML file")
+    load.add_argument("file")
+    load.add_argument("--dry-run", action="store_true", help="show what would be added and write nothing")
+    load.set_defaults(handler=import_roster)
     return parser
 
 

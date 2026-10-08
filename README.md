@@ -70,7 +70,10 @@ uv run pr-league-admin members add Platform alexghdev --slack U0123ABCDEF --jira
 uv run pr-league-admin members move alexghdev Web
 uv run pr-league-admin members remove alexghdev
 uv run pr-league-admin teams remove Platform
+uv run pr-league-admin import roster.yaml --dry-run   # preview, then run without --dry-run
 ```
+
+`import` loads a YAML file of `players` (each with `github`, `team`, and optionally `slack` and `jira`; `org` is ignored). It only adds: players already on the right team are skipped, so it is safe to re-run, and existing members are never changed or removed. It stops without writing anything if a player has no team, a login is listed twice, or a login is already on a different team. All the teams are written in one transaction.
 
 - Every player belongs to exactly one team. A GitHub login can't be on two teams (case is ignored).
 - `--slack` is the Slack member ID (profile -> ... -> Copy member ID). Without it the player is scored but gets no DM.
@@ -119,7 +122,7 @@ src/pr_league/
   models.py      Player, ReviewEvent, TicketEvent, Standing, TeamStanding, point values
   config.py      load settings and tokens from the environment, and the roster
   roster.py      load and validate the teams table into players
-  admin.py       pr-league-admin: edit teams and members
+  admin.py       pr-league-admin: edit teams and members, import a roster file
   github.py      fetch review events for the org (retries on connection errors)
   scoring.py     pure: reviews + tickets + roster -> standings, team standings, win streaks
   rendering.py   pure: standings and tickets -> notification text

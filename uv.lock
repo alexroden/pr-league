@@ -350,6 +350,7 @@ dependencies = [
     { name = "boto3" },
     { name = "httpx" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -364,6 +365,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.43.109" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "python-dotenv", specifier = ">=1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 
 [package.metadata.requires-dev]
