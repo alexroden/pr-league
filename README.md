@@ -70,6 +70,7 @@ uv run pr-league-admin teams list Platform               # one team: Slack and J
 uv run pr-league-admin teams add Platform --empty       # an empty team, filled by hand
 uv run pr-league-admin members add Platform alexghdev --slack U0123ABCDEF --jira 712020:abc
 uv run pr-league-admin members move alexghdev Web
+uv run pr-league-admin members update alexghdev --slack U0123ABCDEF
 uv run pr-league-admin members remove alexghdev
 uv run pr-league-admin members exclude alexghdev        # keep their stats out of the league
 uv run pr-league-admin members include alexghdev        # put them back
@@ -82,7 +83,7 @@ uv run pr-league-admin teams remove Platform
 - Each edit is a conditional write, so if two people edit the same team at once, one of them is told to try again rather than silently overwriting the other. `members move` changes both teams in one transaction.
 - `members exclude` is for someone who sits in a team but shouldn't play, such as a manager who came across from Jira. They stay in the table, so a sync won't add them again, and they stay on their team through transfers and syncs. They score nothing and appear in no table or DM, and don't count towards their team's points. `teams list` shows them as `name (excluded)`. People a sync newly adds start in the league, so exclude a new manager after the first add.
 - Their reviews are treated like anyone's not on the roster: a review by an excluded person still earns the author 1 point for receiving it, and a review of an excluded person's PR still earns the reviewer 2 points for giving it.
-- To change a player's Slack or Jira ID, remove them and add them again. There is no update command yet.
+- `members update <github> --slack U… --jira …` changes a member's Slack or Jira ID without touching anything else about them (their team, whether a sync added them, whether they are excluded). Pass either or both. Giving a Jira ID to someone added by hand lets the next sync recognise them, but they stay "added by hand", so a sync still never moves or removes them.
 - A run fails before sending anything if the table is empty, a team has no members, a login is on two teams, or every member is excluded.
 
 ### Pulling teams from Jira

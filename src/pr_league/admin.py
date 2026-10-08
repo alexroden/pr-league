@@ -305,6 +305,23 @@ def members_remove(table, args) -> None:
     _write(table, update)
 
 
+def members_update(table, args) -> None:
+    changes = {field: value for field, value in (("slack", args.slack), ("jira", args.jira)) if value}
+    if not changes:
+        raise AdminError("nothing to update; pass --slack and/or --jira")
+    found = _find(table, args.github)
+    if found is None:
+        raise AdminError(f"{args.github.lower()} is not on any team")
+    team = found[0]
+    old = _members(table, team)
+    new = [
+        {**member, **changes} if member["github"].lower() == args.github.lower() else member
+        for member in old
+    ]
+    if new != old:
+        _write(table, _set_members_update(table.name, team, old, new))
+
+
 def _set_flag(table, args, flagged: bool) -> None:
     found = _find(table, args.github)
     if found is None:
@@ -480,6 +497,11 @@ def _parser() -> argparse.ArgumentParser:
     remove = members.add_parser("remove")
     remove.add_argument("github")
     remove.set_defaults(handler=members_remove)
+    update = members.add_parser("update", help="set a member's Slack or Jira ID")
+    update.add_argument("github")
+    update.add_argument("--slack", help="Slack member ID (U…)")
+    update.add_argument("--jira", help="Jira account ID")
+    update.set_defaults(handler=members_update)
     for name, handler, help_text in (
         ("exclude", members_exclude, "keep a member's stats out of the league"),
         ("include", members_include, "put an excluded member back in the league"),

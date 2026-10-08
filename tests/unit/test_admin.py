@@ -667,3 +667,75 @@ def test_teams_list_with_a_team_does_not_list_the_other_teams(table, capsys):
     run(table, "teams", "list", "Web")
     out = capsys.readouterr().out
     assert "alice" in out and "bob" not in out and "Data" not in out
+
+
+def test_members_update_sets_a_slack_id_and_keeps_every_other_field(table):
+    seed(table, "Web", {**jm("alice", "a1"), "out_of_league": True}, jm("bob", "a2"), jira_team="Web")
+    run(table, "members", "update", "ALICE", "--slack", "U0123ABCDEF")
+    assert stored(table, "Web")["members"] == [
+        {**jm("alice", "a1"), "out_of_league": True, "slack": "U0123ABCDEF"},
+        jm("bob", "a2"),
+    ]
+
+
+def test_members_update_replaces_an_existing_slack_id(table):
+    seed(table, "Web", {**jm("alice", "a1"), "slack": "U1"})
+    run(table, "members", "update", "alice", "--slack", "U2")
+    assert stored(table, "Web")["members"] == [{**jm("alice", "a1"), "slack": "U2"}]
+
+
+def test_members_update_sets_a_jira_id_on_someone_added_by_hand_and_leaves_them_manual(table):
+    seed(table, "Web", {"github": "alice"})
+    run(table, "members", "update", "alice", "--jira", "a1")
+    assert stored(table, "Web")["members"] == [{"github": "alice", "jira": "a1"}]
+
+
+def test_members_update_can_set_both_ids_at_once(table):
+    seed(table, "Web", {"github": "alice"})
+    run(table, "members", "update", "alice", "--slack", "U1", "--jira", "a1")
+    assert stored(table, "Web")["members"] == [{"github": "alice", "slack": "U1", "jira": "a1"}]
+
+
+def test_members_update_only_touches_the_named_member(table):
+    seed(table, "Web", {"github": "alice"}, {"github": "bob"})
+    seed(table, "Data", {"github": "cy"})
+    run(table, "members", "update", "bob", "--slack", "U2")
+    assert stored(table, "Web")["members"] == [{"github": "alice"}, {"github": "bob", "slack": "U2"}]
+    assert stored(table, "Data")["members"] == [{"github": "cy"}]
+
+
+def test_members_update_needs_something_to_change(table):
+    seed(table, "Web", {"github": "alice"})
+    with pytest.raises(AdminError, match="pass --slack and/or --jira"):
+        run(table, "members", "update", "alice")
+
+
+def test_members_update_rejects_an_unknown_login(table):
+    with pytest.raises(AdminError, match="alice is not on any team"):
+        run(table, "members", "update", "alice", "--slack", "U1")
+
+
+def test_members_update_with_the_same_values_writes_nothing(table):
+    seed(table, "Web", {"github": "alice", "slack": "U1"})
+    before = stored(table, "Web")
+    run(table, "members", "update", "alice", "--slack", "U1")
+    assert stored(table, "Web") == before
+
+
+def test_a_person_given_a_slack_id_is_loaded_with_it(table):
+    seed(table, "Web", jm("alice", "a1"))
+    run(table, "members", "update", "alice", "--slack", "U1")
+    assert [(p.github, p.slack) for p in load_players(table)] == [("alice", "U1")]
+
+
+def test_a_hand_added_member_given_their_jira_id_is_recognised_by_the_next_sync(table):
+    seed(table, "Web", {"github": "alice"}, jira_team="Web")
+    jira = jira_team(("Web", ["a1"]))
+    search = FakeSearch({"a1@acme.com": "alice-the-second"})
+    sync_run(table, jira, search, "teams", "sync", "Web")
+    assert [m["github"] for m in stored(table, "Web")["members"]] == ["alice", "alice-the-second"]
+
+    seed(table, "Web", {"github": "alice"}, jira_team="Web")
+    run(table, "members", "update", "alice", "--jira", "a1")
+    sync_run(table, jira, search, "teams", "sync", "Web")
+    assert stored(table, "Web")["members"] == [{"github": "alice", "jira": "a1"}]
