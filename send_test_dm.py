@@ -1,8 +1,8 @@
 """Send yourself a stubbed DM. With --mock, prints the DM and the Slack call instead of sending.
 
 All players, teams, and both months' reviews are fixtures — no GitHub is
-contacted, so it runs instantly. The players, teams and identities come from the roster file
-(--config); the first player is you. Real players take the fixtures' stand-in names, and any
+contacted, so it runs instantly. The players, teams and identities come from the DynamoDB
+teams table (PR_LEAGUE_TABLE); --me picks which player you are. Real players take the fixtures' stand-in names, and any
 leftover stand-ins stay in the league. Reviews and tickets are fixtures. If today is within
 WINNERS_WINDOW_DAYS of the start of the month, the DM also announces the
 previous month's stubbed winners. On Fridays, or with --jira, it ends with
@@ -10,13 +10,14 @@ the reader's stubbed "This week in Jira" and "This month in Jira" blocks.
 """
 import argparse
 import logging
+import os
 import sys
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 
 from pr_league.casting import cast_roster, rename_reviews, rename_tickets
-from pr_league.config import load_players
+from pr_league.roster import connect, load_players
 from pr_league.models import Player, ReviewEvent, TicketEvent
 from pr_league.rendering import month_start, render_dm, render_jira_month, render_jira_week, render_winners, week_start
 from pr_league.scoring import rank_teams, score, win_streaks
@@ -124,7 +125,7 @@ AUGUST_TEAM_WINNERS = SEPTEMBER_TEAM_WINNERS = {"Web"}
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--me", required=True, help="your GitHub login; the DM goes to you")
     parser.add_argument("--mock", action="store_true", help="print the DM instead of sending it")
     parser.add_argument(
         "--channel",
@@ -136,13 +137,19 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     load_dotenv()
 
+    table_name = os.environ.get("PR_LEAGUE_TABLE")
+    if not table_name:
+        sys.exit("PR_LEAGUE_TABLE is not set (see .env.example)")
     try:
-        real = load_players(args.config)
-    except (OSError, ValueError) as error:
-        sys.exit(f"{args.config}: {error}")
-    you = real[0]
+        real = load_players(connect(table_name))
+    except ValueError as error:
+        sys.exit(f"{table_name}: {error}")
+    you = next((p for p in real if p.github.lower() == args.me.lower()), None)
+    if you is None:
+        sys.exit(f"{args.me} is not on any team in {table_name}")
     if you.slack is None:
-        sys.exit(f"{you.github} has no Slack ID in {args.config}; the test DM goes to the first player")
+        sys.exit(f"{you.github} has no Slack ID in {table_name}")
+    real = (you, *(p for p in real if p is not you))
 
     now = datetime.now().astimezone()
     roster, rename = cast_roster(real, FAKE_PLAYERS)
@@ -184,7 +191,7 @@ def main():
         print(f"POST chat.postMessage channel={destination}\n\n{text}")
         return 0
 
-    token = __import__("os").environ.get("SLACK_BOT_TOKEN")
+    token = os.environ.get("SLACK_BOT_TOKEN")
     if not token:
         sys.exit("SLACK_BOT_TOKEN is not set (see .env.example)")
     SlackMessenger(token).send(destination, text)

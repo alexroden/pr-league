@@ -1,61 +1,46 @@
 import pytest
 
-from pr_league.config import load_config, load_players
+from pr_league.config import load_config
+from pr_league.models import Player
+
+PLAYERS = (Player("sam", "U1", "Web"),)
 
 
 @pytest.fixture(autouse=True)
-def tokens(monkeypatch):
+def env(monkeypatch):
+    monkeypatch.setenv("GITHUB_ORG", "acme")
     monkeypatch.setenv("GITHUB_TOKEN", "gh-token")
+    monkeypatch.setenv("PR_LEAGUE_TABLE", "pr-league-teams")
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
 
 
-def load(tmp_path, body):
-    path = tmp_path / "config.yaml"
-    path.write_text(body)
-    return load_config(path)
+def fake_loader(seen):
+    def load(table_name):
+        seen.append(table_name)
+        return PLAYERS
+
+    return load
 
 
-def test_player_jira_id_is_loaded(tmp_path):
-    config = load(tmp_path, "org: acme\nplayers:\n  - github: sam\n    slack: U1\n    jira: 712020:abc\n")
-    assert config.players[0].jira == "712020:abc"
+def test_config_comes_from_the_environment_and_the_named_table(monkeypatch):
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb")
+    seen = []
+    config = load_config(fake_loader(seen))
+    assert (config.org, config.players, config.github_token, config.slack_token) == (
+        "acme",
+        PLAYERS,
+        "gh-token",
+        "xoxb",
+    )
+    assert seen == ["pr-league-teams"]
 
 
-def test_jira_id_is_optional(tmp_path):
-    config = load(tmp_path, "org: acme\nplayers:\n  - github: sam\n    slack: U1\n")
-    assert config.players[0].jira is None
+def test_slack_token_is_optional():
+    assert load_config(fake_loader([])).slack_token is None
 
 
-def test_null_slack_id_loads_as_none(tmp_path):
-    config = load(tmp_path, "org: acme\nplayers:\n  - github: sam\n    slack: null\n")
-    assert config.players[0].slack is None
-
-
-def test_missing_slack_key_loads_as_none(tmp_path):
-    config = load(tmp_path, "org: acme\nplayers:\n  - github: sam\n")
-    assert config.players[0].slack is None
-
-
-def test_team_and_slack_still_load(tmp_path):
-    config = load(tmp_path, "org: acme\nplayers:\n  - github: sam\n    slack: U1\n    team: Web\n")
-    player = config.players[0]
-    assert (player.github, player.slack, player.team) == ("sam", "U1", "Web")
-
-
-def test_org_and_players_are_required(tmp_path):
-    with pytest.raises(ValueError):
-        load(tmp_path, "org: acme\n")
-
-
-def test_load_players_needs_no_tokens(tmp_path, monkeypatch):
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    path = tmp_path / "roster.yaml"
-    path.write_text("org: acme\nplayers:\n  - github: sam\n    jira: 712020:abc\n    team: Web\n")
-    players = load_players(path)
-    assert [(p.github, p.jira, p.team) for p in players] == [("sam", "712020:abc", "Web")]
-
-
-def test_load_players_requires_at_least_one_player(tmp_path):
-    path = tmp_path / "roster.yaml"
-    path.write_text("org: acme\n")
-    with pytest.raises(ValueError):
-        load_players(path)
+@pytest.mark.parametrize("name", ["GITHUB_ORG", "GITHUB_TOKEN", "PR_LEAGUE_TABLE"])
+def test_each_required_variable_is_named_when_missing(monkeypatch, name):
+    monkeypatch.delenv(name)
+    with pytest.raises(ValueError, match=name):
+        load_config(fake_loader([]))
