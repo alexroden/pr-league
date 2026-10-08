@@ -65,12 +65,42 @@ def _write(table, *updates: dict) -> None:
             table.meta.client.transact_write_items(TransactItems=[{"Update": u} for u in updates])
 
 
-def teams_list(table, _args) -> None:
+def teams_list(table, args) -> None:
+    if args.team:
+        _show_team(table, args.team)
+        return
     for item in sorted(scan_teams(table), key=lambda i: i["team"]):
         names = ", ".join(
             m["github"] + (" (excluded)" if m.get("out_of_league") else "") for m in item.get("members", [])
         ) or "(no members)"
         print(f"{item['team']}: {names}")
+
+
+def _show_team(table, team: str) -> None:
+    item = table.get_item(Key={"team": team}, ConsistentRead=True).get("Item")
+    if item is None:
+        raise AdminError(f"no team {team}")
+    jira_team = item.get("jira_team")
+    print(f"{team} (Jira team: {jira_team})" if jira_team else f"{team} (not linked to a Jira team)")
+    members = item.get("members", [])
+    if not members:
+        print("(no members)")
+        return
+    rows = [
+        (
+            m["github"],
+            m.get("slack") or "-",
+            m.get("jira") or "-",
+            m.get("source", "manual"),
+            "excluded" if m.get("out_of_league") else "",
+        )
+        for m in members
+    ]
+    table_rows = [("GITHUB", "SLACK", "JIRA", "SOURCE", "STATUS"), *rows]
+    widths = [max(len(row[i]) for row in table_rows) for i in range(4)]
+    for row in table_rows:
+        cells = [cell.ljust(width) for cell, width in zip(row[:4], widths)]
+        print("  ".join([*cells, row[4]]).rstrip())
 
 
 def _sync_teams(items: list[dict]) -> list[Team]:
@@ -417,7 +447,9 @@ def _parser() -> argparse.ArgumentParser:
     groups = parser.add_subparsers(dest="group", required=True)
 
     teams = groups.add_parser("teams").add_subparsers(dest="command", required=True)
-    teams.add_parser("list").set_defaults(handler=teams_list)
+    list_teams = teams.add_parser("list", help="list the teams, or one team's members")
+    list_teams.add_argument("team", nargs="?", help="show this team's members in detail")
+    list_teams.set_defaults(handler=teams_list)
     add_team = teams.add_parser("add", help="add a team, pulling its developers from Jira")
     add_team.add_argument("team")
     add_team.add_argument("--jira-team", help="the Atlassian team's name, if it differs from the team's")

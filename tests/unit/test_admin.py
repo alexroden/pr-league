@@ -618,3 +618,52 @@ def test_a_dry_run_words_actions_as_would_but_reports_are_not_prefixed(table, ca
     lines = capsys.readouterr().out.splitlines()
     assert "would add alice to Web" in lines
     assert "a2 could not be matched to a GitHub login for Web" in lines
+
+
+def test_teams_list_with_a_team_shows_each_member_and_their_details(table, capsys):
+    seed(
+        table, "Web",
+        {**jm("alice", "a1"), "slack": "U1"},
+        {"github": "bob", "source": "manual"},
+        {**jm("cy", "a3"), "out_of_league": True},
+        jira_team="Web Team",
+    )
+    run(table, "teams", "list", "Web")
+    assert capsys.readouterr().out.splitlines() == [
+        "Web (Jira team: Web Team)",
+        "GITHUB  SLACK  JIRA  SOURCE  STATUS",
+        "alice   U1     a1    jira",
+        "bob     -      -     manual",
+        "cy      -      a3    jira    excluded",
+    ]
+
+
+def test_teams_list_with_a_team_that_is_not_linked_says_so_in_the_heading(table, capsys):
+    seed(table, "Ops", {"github": "bob"})
+    run(table, "teams", "list", "Ops")
+    assert capsys.readouterr().out.splitlines()[0] == "Ops (not linked to a Jira team)"
+
+
+def test_a_member_with_no_source_is_shown_as_manual(table, capsys):
+    seed(table, "Ops", {"github": "bob"})
+    run(table, "teams", "list", "Ops")
+    assert capsys.readouterr().out.splitlines()[2].split() == ["bob", "-", "-", "manual"]
+
+
+def test_teams_list_with_an_empty_team_says_there_are_no_members(table, capsys):
+    seed(table, "Ops")
+    run(table, "teams", "list", "Ops")
+    assert capsys.readouterr().out.splitlines() == ["Ops (not linked to a Jira team)", "(no members)"]
+
+
+def test_teams_list_with_an_unknown_team_is_an_error(table):
+    with pytest.raises(AdminError, match="no team Web"):
+        run(table, "teams", "list", "Web")
+
+
+def test_teams_list_with_a_team_does_not_list_the_other_teams(table, capsys):
+    seed(table, "Web", jm("alice", "a1"))
+    seed(table, "Data", jm("bob", "a2"))
+    run(table, "teams", "list", "Web")
+    out = capsys.readouterr().out
+    assert "alice" in out and "bob" not in out and "Data" not in out

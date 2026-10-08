@@ -65,7 +65,8 @@ You also need AWS credentials that can reach the teams table (for example `aws s
 Teams and their members live in DynamoDB, one item per team. Edit them with `pr-league-admin`:
 
 ```bash
-uv run pr-league-admin teams list
+uv run pr-league-admin teams list                        # every team and its members
+uv run pr-league-admin teams list Platform               # one team: Slack and Jira IDs, source, excluded
 uv run pr-league-admin teams add Platform --empty       # an empty team, filled by hand
 uv run pr-league-admin members add Platform alexghdev --slack U0123ABCDEF --jira 712020:abc
 uv run pr-league-admin members move alexghdev Web
