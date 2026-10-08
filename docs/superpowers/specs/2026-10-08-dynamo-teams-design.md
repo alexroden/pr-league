@@ -87,7 +87,7 @@ Add `boto3`. `pyyaml` stays, for `import`. Add dev dependencies `moto[dynamodb]`
 
 ## Files Removed Or Rewritten
 
-`config.example.yaml` is deleted. `.env.example` gains `GITHUB_ORG`, `PR_LEAGUE_TABLE` and `AWS_REGION`. The README setup and roster sections are rewritten. `config.yaml` and `roster.derived.yaml` stay in `.gitignore`, because local copies with real member IDs still exist and should be moved into the table, then deleted.
+`config.example.yaml` is deleted. `.env.example` gains `GITHUB_ORG`, `PR_LEAGUE_TABLE` and `AWS_DEFAULT_REGION`. The README setup and roster sections are rewritten. `config.yaml` and `roster.derived.yaml` stay in `.gitignore`, because local copies with real member IDs still exist and should be moved into the table, then deleted.
 
 ## Risks And Open Questions
 

@@ -53,7 +53,7 @@ You also need AWS credentials that can reach the teams table (for example `aws s
 |----------|------------|
 | `GITHUB_ORG` | The GitHub org whose reviews are scored. |
 | `PR_LEAGUE_TABLE` | The DynamoDB teams table, normally `pr-league-teams`. |
-| `AWS_REGION` | `eu-west-2`. |
+| `AWS_DEFAULT_REGION` | `eu-west-2`. boto3 ignores `AWS_REGION`. |
 | `GITHUB_TOKEN` | A personal access token with read access to the org's repos. If the org uses SSO, authorise the token for it or every count comes back 0. |
 | `SLACK_BOT_TOKEN` | A bot token (`xoxb-...`) for a Slack app with the `chat:write` scope, installed to your workspace. |
 
@@ -70,16 +70,36 @@ uv run pr-league-admin members add Platform alexghdev --slack U0123ABCDEF --jira
 uv run pr-league-admin members move alexghdev Web
 uv run pr-league-admin members remove alexghdev
 uv run pr-league-admin teams remove Platform
-uv run pr-league-admin import roster.yaml --dry-run   # preview, then run without --dry-run
 ```
-
-`import` loads a YAML file of `players` (each with `github`, `team`, and optionally `slack` and `jira`; `org` is ignored). It only adds: players already on the right team are skipped, so it is safe to re-run, and existing members are never changed or removed. It stops without writing anything if a player has no team, a login is listed twice, or a login is already on a different team. All the teams are written in one transaction.
 
 - Every player belongs to exactly one team. A GitHub login can't be on two teams (case is ignored).
 - `--slack` is the Slack member ID (profile -> ... -> Copy member ID). Without it the player is scored but gets no DM.
 - `--jira` is optional and unused until Jira is read for real.
 - Each edit is a conditional write, so if two people edit the same team at once, one of them is told to try again rather than silently overwriting the other. `members move` changes both teams in one transaction.
+- To change a player's Slack or Jira ID, remove them and add them again. There is no update command yet.
 - A run fails before sending anything if the table is empty, a team has no members, or a login is on two teams.
+
+### Importing a roster file
+
+To load an existing roster, put it in a YAML file and import it:
+
+```yaml
+players:
+  - github: alexghdev
+    team: Platform
+    slack: U0123ABCDEF     # optional
+    jira: 712020:abc       # optional
+```
+
+```bash
+uv run pr-league-admin import roster.yaml --dry-run   # preview what would be added
+uv run pr-league-admin import roster.yaml
+```
+
+- An `org:` key in the file is ignored; the org comes from `GITHUB_ORG`.
+- Import only adds. Players already on the right team are skipped, so it is safe to re-run, and existing members are never changed or removed.
+- Nothing is written if a player has no team, a login is listed twice, or a login is already on a different team. Otherwise all the teams are written in one transaction.
+- Once the roster is in the table, delete the file: it holds real member IDs.
 
 ## Running
 
@@ -155,4 +175,4 @@ Why DynamoDB rather than Arbor's default datastores is recorded in `docs/adr/000
 - The league is stateless. Winners are only announced for runs in the first 7 days of a month, and streaks are rebuilt by re-scoring up to the last six months, so a run in that window makes several full org fetches.
 - Local runs need AWS credentials, because the roster is only in DynamoDB.
 - Runs are manual. There is no scheduler, so the Friday Jira blocks need something outside the bot (cron, a GitHub Actions schedule) to run it on Fridays.
-- Jira is not read yet. There is no Jira client, no Jira identity per player (the stub matches ticket movers by GitHub login), and no handling for a Jira outage. All of it is listed under Deferred in the Jira spec.
+- Jira is not read yet. There is no Jira client and no handling for a Jira outage. Each player's Jira ID is stored but not used (the stub matches ticket movers by GitHub login). All of it is listed under Deferred in the Jira spec.
