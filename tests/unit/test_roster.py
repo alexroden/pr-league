@@ -71,3 +71,40 @@ def test_sync_fields_on_items_and_members_do_not_affect_the_players_loaded(table
     )
     assert load_players(table) == (Player("sam", None, "Web", "a1"),)
 
+
+def test_a_member_flagged_out_of_the_league_is_not_loaded(table):
+    put(table, "Web", {"github": "sam"}, {"github": "mo", "out_of_league": True})
+    assert [p.github for p in load_players(table)] == ["sam"]
+
+
+def test_a_team_whose_members_are_all_flagged_is_valid(table):
+    put(table, "Web", {"github": "sam"})
+    put(table, "Mgmt", {"github": "mo", "out_of_league": True})
+    assert [p.team for p in load_players(table)] == ["Web"]
+
+
+def test_a_flagged_member_still_counts_for_the_one_team_rule(table):
+    put(table, "Web", {"github": "Sam", "out_of_league": True})
+    put(table, "Data", {"github": "sam"})
+    with pytest.raises(ValueError, match="sam"):
+        load_players(table)
+
+
+def test_a_league_where_everyone_is_flagged_is_rejected(table):
+    put(table, "Web", {"github": "mo", "out_of_league": True})
+    with pytest.raises(ValueError, match="every member is out of the league"):
+        load_players(table)
+
+
+def test_a_flagged_member_scores_nothing_but_the_other_side_of_their_reviews_still_does(table):
+    from datetime import datetime, timezone
+
+    from pr_league.models import ReviewEvent
+    from pr_league.scoring import rank_teams, score
+
+    put(table, "Web", {"github": "sam"}, {"github": "mo", "out_of_league": True})
+    at = datetime(2026, 10, 3, tzinfo=timezone.utc)
+    events = [ReviewEvent("acme/app#1", "mo", "sam", at), ReviewEvent("acme/app#2", "sam", "mo", at)]
+    standings = score(events, load_players(table))
+    assert [(s.player.github, s.given, s.received, s.points) for s in standings] == [("sam", 1, 1, 3)]
+    assert [(t.name, t.points) for t in rank_teams(standings)] == [("Web", 3)]

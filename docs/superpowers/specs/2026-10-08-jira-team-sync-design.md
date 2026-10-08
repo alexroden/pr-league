@@ -41,6 +41,7 @@ Additions to the `pr-league-teams` item (existing items without them still load)
 Additions to each member map:
 
 - `source`: `"jira"` or `"manual"`. Absent means `manual`. Only `jira` members are ever removed or moved by a sync.
+- `out_of_league` (bool): the member is kept in the table and on their team but is not loaded as a player, so they score nothing and appear nowhere. They still count for the one-team-per-login rule, so a sync never adds them again, and the flag survives transfers and sync moves. The name differs from the team's `excluded` list on purpose. Set with `members exclude`, cleared with `members include`.
 
 The loader ignores these fields, so `Player` and `roster.load_players` are unchanged. The one-team-per-login check stays in the loader and is what enforces "first team wins".
 

@@ -537,3 +537,72 @@ def test_adding_someone_by_hand_lifts_their_exclusion_and_records_the_source(tab
     assert item["excluded"] == ["a2"]
     assert item["members"] == [{"github": "alice", "jira": "a1", "source": "manual"}]
 
+
+def test_members_exclude_flags_the_member_and_keeps_their_other_fields(table):
+    seed(table, "Web", {**jm("alice", "a1"), "slack": "U1"}, jm("bob", "a2"), jira_team="Web")
+    run(table, "members", "exclude", "ALICE")
+    assert stored(table, "Web")["members"] == [
+        {**jm("alice", "a1"), "slack": "U1", "out_of_league": True},
+        jm("bob", "a2"),
+    ]
+    assert [p.github for p in load_players(table)] == ["bob"]
+
+
+def test_members_include_clears_the_flag(table):
+    seed(table, "Web", {**jm("alice", "a1"), "out_of_league": True}, jm("bob", "a2"))
+    run(table, "members", "include", "alice")
+    assert stored(table, "Web")["members"] == [jm("alice", "a1"), jm("bob", "a2")]
+
+
+def test_excluding_twice_and_including_a_member_who_is_not_flagged_change_nothing(table):
+    seed(table, "Web", jm("alice", "a1"), jm("bob", "a2"))
+    run(table, "members", "include", "alice")
+    run(table, "members", "exclude", "alice")
+    run(table, "members", "exclude", "alice")
+    assert stored(table, "Web")["members"][0] == {**jm("alice", "a1"), "out_of_league": True}
+
+
+@pytest.mark.parametrize("command", ["exclude", "include"])
+def test_exclude_and_include_reject_an_unknown_login(table, command):
+    with pytest.raises(AdminError, match="alice is not on any team"):
+        run(table, "members", command, "alice")
+
+
+def test_teams_list_marks_excluded_members(table, capsys):
+    seed(table, "Web", {**jm("alice", "a1"), "out_of_league": True}, jm("bob", "a2"))
+    run(table, "teams", "list")
+    assert capsys.readouterr().out == "Web: alice (excluded), bob\n"
+
+
+def test_the_flag_survives_a_transfer_with_members_move(table):
+    seed(table, "Web", {**jm("alice", "a1"), "out_of_league": True}, jira_team="Web")
+    seed(table, "Data", jira_team="Data", added_at="2026-02-01T00:00:00+00:00")
+    move_run(table, jira_team(("Data", ["a1"])), "members", "move", "alice", "Data")
+    assert stored(table, "Data")["members"] == [{**jm("alice", "a1"), "out_of_league": True}]
+
+
+def test_the_flag_survives_a_sync_that_moves_someone_who_left_their_jira_team(table):
+    seed(table, "Web", {**jm("alice", "a1"), "out_of_league": True}, jira_team="Web")
+    seed(table, "Data", jira_team="Data", added_at="2026-02-01T00:00:00+00:00")
+    sync_run(table, jira_team(("Web", []), ("Data", ["a1"])), FakeSearch({}), "teams", "sync", "Web")
+    assert stored(table, "Data")["members"] == [{**jm("alice", "a1"), "out_of_league": True}]
+
+
+def test_a_flagged_member_is_not_added_a_second_time_by_a_sync_of_their_own_team(table):
+    seed(table, "Web", {**jm("alice", "a1"), "out_of_league": True}, jira_team="Web")
+    sync_run(table, jira_team(("Web", ["a1"])), FakeSearch({"a1@acme.com": "alice"}), "teams", "sync", "Web")
+    assert stored(table, "Web")["members"] == [{**jm("alice", "a1"), "out_of_league": True}]
+
+
+def test_a_flagged_member_is_not_pulled_onto_a_second_team_by_its_sync(table):
+    seed(table, "Web", {**jm("alice", "a1"), "out_of_league": True}, jira_team="Web")
+    seed(table, "Data", jira_team="Data", added_at="2026-02-01T00:00:00+00:00")
+    jira = jira_team(("Web", ["a1"]), ("Data", ["a1"]))
+    sync_run(table, jira, FakeSearch({"a1@acme.com": "alice"}), "teams", "sync", "Data")
+    assert stored(table, "Data")["members"] == []
+
+
+def test_someone_newly_added_by_a_sync_starts_in_the_league(table):
+    seed(table, "Web", jira_team="Web")
+    sync_run(table, jira_team(("Web", ["a1"])), FakeSearch({"a1@acme.com": "alice"}), "teams", "sync", "Web")
+    assert "out_of_league" not in stored(table, "Web")["members"][0]

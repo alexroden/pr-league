@@ -34,5 +34,8 @@ def load_players(table) -> tuple[Player, ...]:
             if key in owner:
                 raise ValueError(f"{key} is on both {owner[key]!r} and {team!r}")
             owner[key] = team
-            players.append(Player(github, member.get("slack"), team, member.get("jira")))
+            if not member.get("out_of_league"):
+                players.append(Player(github, member.get("slack"), team, member.get("jira")))
+    if not players:
+        raise ValueError("every member is out of the league")
     return tuple(sorted(players, key=lambda p: (p.team, p.github.lower())))

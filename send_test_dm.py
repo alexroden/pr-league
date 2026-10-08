@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 from pr_league.casting import cast_roster, rename_reviews, rename_tickets
-from pr_league.roster import connect, load_players
+from pr_league.roster import connect, load_players, scan_teams
 from pr_league.models import Player, ReviewEvent, TicketEvent
 from pr_league.rendering import month_start, render_dm, render_jira_month, render_jira_week, render_winners, week_start
 from pr_league.scoring import rank_teams, score, win_streaks
@@ -140,10 +140,19 @@ def main():
     table_name = os.environ.get("PR_LEAGUE_TABLE")
     if not table_name:
         sys.exit("PR_LEAGUE_TABLE is not set (see .env.example)")
+    table = connect(table_name)
     try:
-        real = load_players(connect(table_name))
+        real = load_players(table)
     except ValueError as error:
         sys.exit(f"{table_name}: {error}")
+    flagged = {
+        m["github"].lower()
+        for item in scan_teams(table)
+        for m in item.get("members", [])
+        if m.get("out_of_league")
+    }
+    if args.me.lower() in flagged:
+        sys.exit(f"{args.me} is excluded from the league (see pr-league-admin members include)")
     you = next((p for p in real if p.github.lower() == args.me.lower()), None)
     if you is None:
         sys.exit(f"{args.me} is not on any team in {table_name}")

@@ -67,7 +67,9 @@ def _write(table, *updates: dict) -> None:
 
 def teams_list(table, _args) -> None:
     for item in sorted(scan_teams(table), key=lambda i: i["team"]):
-        names = ", ".join(m["github"] for m in item.get("members", [])) or "(no members)"
+        names = ", ".join(
+            m["github"] + (" (excluded)" if m.get("out_of_league") else "") for m in item.get("members", [])
+        ) or "(no members)"
         print(f"{item['team']}: {names}")
 
 
@@ -272,6 +274,31 @@ def members_remove(table, args) -> None:
     _write(table, update)
 
 
+def _set_flag(table, args, flagged: bool) -> None:
+    found = _find(table, args.github)
+    if found is None:
+        raise AdminError(f"{args.github.lower()} is not on any team")
+    team = found[0]
+    old = _members(table, team)
+    new = []
+    for member in old:
+        if member["github"].lower() == args.github.lower():
+            member = {k: v for k, v in member.items() if k != "out_of_league"}
+            if flagged:
+                member["out_of_league"] = True
+        new.append(member)
+    if new != old:
+        _write(table, _set_members_update(table.name, team, old, new))
+
+
+def members_exclude(table, args) -> None:
+    _set_flag(table, args, True)
+
+
+def members_include(table, args) -> None:
+    _set_flag(table, args, False)
+
+
 def members_move(table, args, jira=None, search=None, confirm=None) -> None:
     github = args.github.lower()
     target = table.get_item(Key={"team": args.team}, ConsistentRead=True).get("Item")
@@ -420,6 +447,13 @@ def _parser() -> argparse.ArgumentParser:
     remove = members.add_parser("remove")
     remove.add_argument("github")
     remove.set_defaults(handler=members_remove)
+    for name, handler, help_text in (
+        ("exclude", members_exclude, "keep a member's stats out of the league"),
+        ("include", members_include, "put an excluded member back in the league"),
+    ):
+        flag = members.add_parser(name, help=help_text)
+        flag.add_argument("github")
+        flag.set_defaults(handler=handler)
     move = members.add_parser("move")
     move.add_argument("github")
     move.add_argument("team")
