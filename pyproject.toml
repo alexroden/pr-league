@@ -10,6 +10,7 @@ dependencies = [
 
 [project.scripts]
 pr-league = "pr_league.main:cli"
+pr-league-admin = "pr_league.admin:cli"
 
 [dependency-groups]
 dev = [
