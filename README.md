@@ -54,6 +54,7 @@ You also need AWS credentials that can reach the teams table (for example `aws s
 | `GITHUB_ORG` | The GitHub org whose reviews are scored. |
 | `PR_LEAGUE_TABLE` | The DynamoDB teams table, normally `pr-league-teams`. |
 | `AWS_DEFAULT_REGION` | `eu-west-2`. boto3 ignores `AWS_REGION`. |
+| `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN`, `ATLASSIAN_ORG_ID` | Only `pr-league-admin`'s Jira commands use these; the bot does not. The API token is an Atlassian API token for that email. See [Pulling teams from Jira](#pulling-teams-from-jira). |
 | `GITHUB_TOKEN` | A personal access token with read access to the org's repos. If the org uses SSO, authorise the token for it or every count comes back 0. |
 | `SLACK_BOT_TOKEN` | A bot token (`xoxb-...`) for a Slack app with the `chat:write` scope, installed to your workspace. |
 
@@ -65,7 +66,7 @@ Teams and their members live in DynamoDB, one item per team. Edit them with `pr-
 
 ```bash
 uv run pr-league-admin teams list
-uv run pr-league-admin teams add Platform
+uv run pr-league-admin teams add Platform --empty       # an empty team, filled by hand
 uv run pr-league-admin members add Platform alexghdev --slack U0123ABCDEF --jira 712020:abc
 uv run pr-league-admin members move alexghdev Web
 uv run pr-league-admin members remove alexghdev
@@ -77,7 +78,28 @@ uv run pr-league-admin teams remove Platform
 - `--jira` is optional and unused until Jira is read for real.
 - Each edit is a conditional write, so if two people edit the same team at once, one of them is told to try again rather than silently overwriting the other. `members move` changes both teams in one transaction.
 - To change a player's Slack or Jira ID, remove them and add them again. There is no update command yet.
-- A run fails before sending anything if the table is empty, a team has no members, or a login is on two teams.
+- A run fails before sending anything if the table is empty, a team has no members or a login is on two teams.
+
+### Pulling teams from Jira
+
+`teams add` creates a team and fills it from the Atlassian team of the same name (or `--jira-team "<name>"`). A person is added when they are an active member of the Jira `developers` group and a GitHub login can be found for them. The login comes from searching GitHub commits for their Jira email address.
+
+```bash
+uv run pr-league-admin teams add Platform --dry-run     # preview who would be added
+uv run pr-league-admin teams add Platform
+uv run pr-league-admin teams link Web --jira-team "Web Team"   # connect a team that already exists
+uv run pr-league-admin teams sync Platform              # or --all
+uv run pr-league-admin members move alexghdev Data      # choose which team someone scores for
+```
+
+- Someone can be in several Jira teams but scores for one league team. They stay on whichever team they were added to first, and later teams skip them and say so.
+- `members move` transfers them to another team, but only one they are a developer in on Jira. Someone not on any team yet needs `--jira <account-id>`.
+- `teams sync` adds new developers. Someone who left their Jira team moves to the oldest-added team they are still in on Jira, or is removed if there is none. Removals ask for confirmation, or take `--yes`. `--dry-run` shows everything and writes nothing.
+- Only people added by Jira are moved or removed by a sync. Anyone added with `members add` or `import` is left alone, and can't be moved with `members move` (it has no Jira ID to check).
+- Removing a Jira-added person by hand stops the next sync adding them back. `members add` or `members move` lifts that.
+- People with no visible Jira email, no commits under that email, or only `noreply` commits are listed as unmatched and not added. Add them with `members add`.
+- A wrong match goes straight into the table. Use `--dry-run` first.
+- These commands make no Slack ID, so people they add get no DM until one is set.
 
 ### Importing a roster file
 
@@ -142,7 +164,10 @@ src/pr_league/
   models.py      Player, ReviewEvent, TicketEvent, Standing, TeamStanding, point values
   config.py      load settings and tokens from the environment, and the roster
   roster.py      load and validate the teams table into players
-  admin.py       pr-league-admin: edit teams and members, import a roster file
+  admin.py       pr-league-admin: edit teams and members, import a roster, sync with Jira
+  jira.py        Atlassian client: teams, developers, emails
+  matching.py    find a GitHub login from a commit author email
+  sync.py        pure: plan the adds, moves and removals for a Jira sync
   github.py      fetch review events for the org (retries on connection errors)
   scoring.py     pure: reviews + tickets + roster -> standings, team standings, win streaks
   rendering.py   pure: standings and tickets -> notification text

@@ -1,26 +1,8 @@
-import boto3
 import pytest
-from moto import mock_aws
 
 from pr_league.models import Player
 from pr_league.roster import load_players
 
-TABLE = "pr-league-teams"
-
-
-@pytest.fixture
-def table(monkeypatch):
-    monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-2")
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    with mock_aws():
-        resource = boto3.resource("dynamodb", region_name="eu-west-2")
-        yield resource.create_table(
-            TableName=TABLE,
-            KeySchema=[{"AttributeName": "team", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "team", "AttributeType": "S"}],
-            BillingMode="PAY_PER_REQUEST",
-        )
 
 
 def put(table, team, *members):
@@ -75,3 +57,17 @@ def test_a_scan_is_followed_across_pages(table):
     for i in range(60):
         put(table, f"T{i:02}", {"github": f"p{i:02}", "slack": "U" + "x" * 20_000})
     assert len(load_players(table)) == 60
+
+
+def test_sync_fields_on_items_and_members_do_not_affect_the_players_loaded(table):
+    table.put_item(
+        Item={
+            "team": "Web",
+            "members": [{"github": "sam", "jira": "a1", "source": "jira"}],
+            "jira_team": "Web",
+            "added_at": "2026-01-01T00:00:00+00:00",
+            "excluded": ["a2"],
+        }
+    )
+    assert load_players(table) == (Player("sam", None, "Web", "a1"),)
+
