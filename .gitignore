@@ -1,6 +1,11 @@
 .env
-config.yaml
 .venv/
 __pycache__/
 .pytest_cache/
 .DS_Store
+.terraform/
+*.tfstate
+*.tfstate.*
+config.yaml
+roster.derived.yaml
+.coverage

@@ -69,6 +69,9 @@ def run(config: Config, github: GitHubClient, messenger: SlackMessenger | None, 
 
     failures = 0
     for standing in standings:
+        if standing.player.slack is None:
+            log.warning("No Slack ID for %s, skipping their DM", standing.player.github)
+            continue
         text = render_dm(standing, standings, now.date(), teams, winners)
         if messenger is None:
             print(f"--- would DM {standing.player.github} ({standing.player.slack}) ---\n{text}\n")
@@ -85,12 +88,14 @@ def run(config: Config, github: GitHubClient, messenger: SlackMessenger | None, 
 def cli() -> None:
     parser = argparse.ArgumentParser(prog="pr-league")
     parser.add_argument("--dry-run", action="store_true", help="print the DMs instead of sending them")
-    parser.add_argument("--config", default="config.yaml")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     load_dotenv()
-    config = load_config(args.config)
+    try:
+        config = load_config()
+    except ValueError as error:
+        sys.exit(str(error))
 
     messenger = None
     if not args.dry_run:

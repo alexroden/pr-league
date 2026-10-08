@@ -13,8 +13,9 @@ TICKET_POINTS = {
 @dataclass(frozen=True)
 class Player:
     github: str
-    slack: str
+    slack: str | None
     team: str | None = None
+    jira: str | None = None
 
 
 @dataclass(frozen=True)
